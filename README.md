@@ -55,6 +55,18 @@ python -m monitor.main                           # real run
 **Telegram:** create a bot with [@BotFather](https://t.me/BotFather), send it
 `/start`, then run `python scripts/get_chat_id.py` to get `TELEGRAM_CHAT_ID`.
 
+## Tests
+
+```bash
+pip install -r requirements-dev.txt
+python -m pytest -q
+```
+
+Covers date sampling, the SQLite baseline/dedupe logic, alert rules, config
+parsing and validation, Telegram message formatting (HTML escaping), and the
+`run()` pipeline end to end with the `fake` source. CI runs them on every push
+and PR (`.github/workflows/ci.yml`).
+
 ## Configuring routes
 
 Edit `config/routes.yaml`. Per-route fields:

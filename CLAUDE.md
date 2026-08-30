@@ -46,6 +46,10 @@ python -m monitor.main --dry-run                 # real fares, nothing sent
 python -m monitor.main                           # real run
 ```
 
+Tests: `pip install -r requirements-dev.txt && python -m pytest -q`
+(pytest reads `pyproject.toml`, which puts `src/` on the path). `MONITOR_DB_PATH`
+overrides the SQLite location — tests point it at a tmp file.
+
 Routes are configured in `config/routes.yaml`. Dates must be in the future —
 Google Flights returns nothing for past dates.
 
@@ -87,3 +91,4 @@ Google Flights returns nothing for past dates.
 | 7 | AI-generated Code | Built with Claude Code; decisions reviewed through ADRs and PRs |
 | 8 | Extensibility / Interface Design | ADR-002 — the `PriceSource` interface |
 | 9 | Where AI fits (and where it doesn't) | ADR-005 — LLM-based promo classification evaluated and deferred |
+| 10 | Test coverage of core logic | `tests/` — baseline/dedupe, alert rules, config, formatting, pipeline; CI on every push |
