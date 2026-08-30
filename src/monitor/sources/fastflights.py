@@ -1,0 +1,94 @@
+from __future__ import annotations
+
+import time
+from datetime import date, timedelta
+
+from fast_flights import FlightQuery, Passengers, create_query, get_flights
+from fast_flights.exceptions import FlightsNotFound
+
+from ..models import Offer, RouteQuery
+from .base import PriceSource
+
+
+def _sample_dates(start: date, end: date, max_samples: int = 4) -> list[date]:
+    """Alguns dias dentro da janela (menos requisições ao Google Flights)."""
+    span = (end - start).days
+    if span <= 0:
+        return [start]
+    step = max(1, span // max_samples)
+    return [start + timedelta(days=d) for d in range(0, span + 1, step)][:max_samples]
+
+
+class FastFlightsSource(PriceSource):
+    """Dados ao vivo do Google Flights via a lib `fast-flights`.
+
+    Não-oficial e sujeito a quebrar quando o Google muda o front-end.
+    Uso pessoal apenas. Não requer chave/cadastro.
+    """
+
+    name = "fastflights"
+
+    def __init__(self, language: str = "pt-BR", pause_s: float = 1.0) -> None:
+        self.language = language
+        self.pause_s = pause_s
+
+    def search(self, route: RouteQuery) -> list[Offer]:
+        offers: list[Offer] = []
+        max_stops = 0 if route.nonstop else None
+
+        for dep in _sample_dates(*route.depart_range):
+            legs = [
+                FlightQuery(
+                    date=dep.isoformat(),
+                    from_airport=route.origin,
+                    to_airport=route.dest,
+                    max_stops=max_stops,
+                )
+            ]
+            trip = "one-way"
+            ret: date | None = None
+            if route.return_after_days:
+                lo, hi = route.return_after_days
+                ret = dep + timedelta(days=(lo + hi) // 2)
+                legs.append(
+                    FlightQuery(
+                        date=ret.isoformat(),
+                        from_airport=route.dest,
+                        to_airport=route.origin,
+                        max_stops=max_stops,
+                    )
+                )
+                trip = "round-trip"
+
+            query = create_query(
+                flights=legs,
+                trip=trip,
+                seat="economy",
+                passengers=Passengers(adults=max(route.adults, 1)),
+                currency=route.currency,
+                language=self.language,
+            )
+
+            try:
+                results = get_flights(query)
+            except FlightsNotFound:
+                continue
+
+            for fl in results:
+                if not fl.price or fl.price <= 0 or not fl.flights:
+                    continue  # "preço indisponível"
+                offers.append(
+                    Offer(
+                        route_key=route.key,
+                        price=float(fl.price),
+                        currency=route.currency,
+                        depart_date=dep,
+                        return_date=ret,
+                        carrier=", ".join(fl.airlines) if fl.airlines else str(fl.type),
+                        stops=max(len(fl.flights) - 1, 0),  # escalas do trecho de ida
+                    )
+                )
+
+            time.sleep(self.pause_s)  # gentileza com o Google
+
+        return offers
