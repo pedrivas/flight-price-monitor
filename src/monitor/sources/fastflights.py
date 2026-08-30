@@ -6,17 +6,9 @@ from datetime import date, timedelta
 from fast_flights import FlightQuery, Passengers, create_query, get_flights
 from fast_flights.exceptions import FlightsNotFound
 
+from ..dates import sample_dates
 from ..models import Offer, RouteQuery
 from .base import PriceSource
-
-
-def _sample_dates(start: date, end: date, max_samples: int = 4) -> list[date]:
-    """Alguns dias dentro da janela (menos requisições ao Google Flights)."""
-    span = (end - start).days
-    if span <= 0:
-        return [start]
-    step = max(1, span // max_samples)
-    return [start + timedelta(days=d) for d in range(0, span + 1, step)][:max_samples]
 
 
 class FastFlightsSource(PriceSource):
@@ -36,7 +28,7 @@ class FastFlightsSource(PriceSource):
         offers: list[Offer] = []
         max_stops = 0 if route.nonstop else None
 
-        for dep in _sample_dates(*route.depart_range):
+        for dep in sample_dates(*route.depart_range):
             legs = [
                 FlightQuery(
                     date=dep.isoformat(),
@@ -48,6 +40,8 @@ class FastFlightsSource(PriceSource):
             trip = "one-way"
             ret: date | None = None
             if route.return_after_days:
+                # checa uma única duração de viagem (ponto médio do range),
+                # para não multiplicar o nº de buscas
                 lo, hi = route.return_after_days
                 ret = dep + timedelta(days=(lo + hi) // 2)
                 legs.append(

@@ -25,7 +25,7 @@ def run(dry_run: bool = False, source_name: str = "fastflights") -> int:
     routes = load_routes()
     source = get_source(source_name)
     storage = Storage()
-    notifier = None if dry_run else TelegramNotifier()
+    notifier = None  # criado sob demanda, só quando há alerta a enviar
 
     alerts = 0
     for route in routes:
@@ -40,9 +40,9 @@ def run(dry_run: bool = False, source_name: str = "fastflights") -> int:
             continue
 
         cheapest = min(offers, key=lambda o: o.price)
+        decision = evaluate(route, cheapest, storage)  # antes de gravar: baseline sem a obs. atual
         storage.record(cheapest)
-        decision = evaluate(route, cheapest, storage)
-        base = f"{decision.baseline:.0f}" if decision.baseline else "s/ histórico"
+        base = f"{decision.baseline:.0f}" if decision.baseline is not None else "s/ histórico"
         print(f"[info] {route.name}: menor {cheapest.currency} {cheapest.price:.0f} (mediana 30d: {base})")
 
         if decision.should_alert:
@@ -50,6 +50,8 @@ def run(dry_run: bool = False, source_name: str = "fastflights") -> int:
             if dry_run:
                 print("---- ALERTA (dry-run) ----\n" + msg + "\n--------------------------")
             else:
+                if notifier is None:
+                    notifier = TelegramNotifier()
                 notifier.send(msg)
                 storage.mark_alerted(cheapest.route_key, cheapest.price)
             alerts += 1

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sys
 from datetime import date
 from pathlib import Path
 
@@ -35,4 +36,12 @@ def load_routes(path: Path = CONFIG_PATH) -> list[RouteQuery]:
                 currency=currency,
             )
         )
+
+    for route in routes:
+        if route.target_price is None and route.drop_pct is None:
+            print(
+                f"[aviso] rota '{route.name}' não tem target_price nem drop_pct "
+                f"— nunca vai gerar alerta",
+                file=sys.stderr,
+            )
     return routes

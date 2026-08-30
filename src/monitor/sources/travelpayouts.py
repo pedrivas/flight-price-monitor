@@ -7,6 +7,7 @@ from datetime import date, timedelta
 
 import requests
 
+from ..dates import sample_dates
 from ..models import Offer, RouteQuery
 from .base import PriceSource
 
@@ -61,7 +62,7 @@ class TravelpayoutsSource(PriceSource):
 
     def search(self, route: RouteQuery) -> list[Offer]:
         offers: list[Offer] = []
-        for dep in _sample_dates(*route.depart_range):
+        for dep in sample_dates(*route.depart_range):
             segments = [{"origin": route.origin, "destination": route.dest, "date": dep.isoformat()}]
             ret: date | None = None
             if route.return_after_days:
@@ -117,11 +118,3 @@ class TravelpayoutsSource(PriceSource):
                     done = True
             if done:
                 break
-
-
-def _sample_dates(start: date, end: date, max_samples: int = 4) -> list[date]:
-    span = (end - start).days
-    if span <= 0:
-        return [start]
-    step = max(1, span // max_samples)
-    return [start + timedelta(days=d) for d in range(0, span + 1, step)][:max_samples]

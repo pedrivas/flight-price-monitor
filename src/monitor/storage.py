@@ -1,12 +1,17 @@
 from __future__ import annotations
 
+import os
 import sqlite3
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 from .models import Offer
 
 DB_PATH = Path(__file__).resolve().parents[2] / "data" / "history.db"
+
+
+def _utc_now() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS price_history (
@@ -32,7 +37,8 @@ CREATE TABLE IF NOT EXISTS alerts_sent (
 
 
 class Storage:
-    def __init__(self, path: Path = DB_PATH) -> None:
+    def __init__(self, path: Path | None = None) -> None:
+        path = path or Path(os.environ.get("MONITOR_DB_PATH", DB_PATH))
         path.parent.mkdir(parents=True, exist_ok=True)
         self.conn = sqlite3.connect(path)
         self.conn.executescript(SCHEMA)
@@ -51,7 +57,7 @@ class Storage:
                 offer.return_date.isoformat() if offer.return_date else None,
                 offer.carrier,
                 offer.stops,
-                datetime.utcnow().isoformat(timespec="seconds"),
+                _utc_now(),
             ),
         )
         self.conn.commit()
@@ -80,6 +86,6 @@ class Storage:
     def mark_alerted(self, route_key: str, price: float) -> None:
         self.conn.execute(
             "INSERT OR REPLACE INTO alerts_sent (route_key, price, sent_at) VALUES (?,?,?)",
-            (route_key, price, datetime.utcnow().isoformat(timespec="seconds")),
+            (route_key, price, _utc_now()),
         )
         self.conn.commit()

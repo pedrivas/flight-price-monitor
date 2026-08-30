@@ -21,7 +21,7 @@ def evaluate(route: RouteQuery, offer: Offer, storage: Storage) -> AlertDecision
     if route.target_price is not None and offer.price <= route.target_price:
         reasons.append(f"preço {offer.price:.0f} ≤ alvo {route.target_price:.0f}")
 
-    if route.drop_pct is not None and baseline:
+    if route.drop_pct is not None and baseline is not None:
         threshold = baseline * (1 - route.drop_pct / 100)
         if offer.price <= threshold:
             pct = (1 - offer.price / baseline) * 100

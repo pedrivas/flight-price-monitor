@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import html
 import os
 from urllib.parse import urlencode
 
@@ -7,6 +8,10 @@ import requests
 
 from .models import Offer, RouteQuery
 from .rules import AlertDecision
+
+
+def _esc(value: object) -> str:
+    return html.escape(str(value), quote=False)
 
 
 def google_flights_link(route: RouteQuery, offer: Offer) -> str:
@@ -18,16 +23,23 @@ def google_flights_link(route: RouteQuery, offer: Offer) -> str:
 
 def format_alert(route: RouteQuery, offer: Offer, decision: AlertDecision) -> str:
     stops = "direto" if offer.stops == 0 else f"{offer.stops} conexão(ões)"
-    lines = [
-        f"✈️ *Promoção: {route.name}*",
-        "",
-        f"💰 *{offer.currency} {offer.price:,.0f}*  ({', '.join(decision.reasons)})",
-        f"📅 Ida {offer.depart_date}" + (f" · Volta {offer.return_date}" if offer.return_date else " (só ida)"),
-        f"🛫 {offer.carrier} · {stops} · {route.adults} pax",
-        "",
-        f"🔗 {google_flights_link(route, offer)}",
-    ]
-    return "\n".join(lines)
+    trip = (
+        f"📅 Ida {offer.depart_date} · Volta {offer.return_date}"
+        if offer.return_date
+        else f"📅 Ida {offer.depart_date} (só ida)"
+    )
+    return "\n".join(
+        [
+            f"✈️ <b>Promoção: {_esc(route.name)}</b>",
+            "",
+            f"💰 <b>{_esc(offer.currency)} {offer.price:,.0f}</b>  "
+            f"({_esc(', '.join(decision.reasons))})",
+            trip,
+            f"🛫 {_esc(offer.carrier)} · {stops} · {route.adults} pax",
+            "",
+            f"🔗 {google_flights_link(route, offer)}",
+        ]
+    )
 
 
 class TelegramNotifier:
@@ -41,7 +53,7 @@ class TelegramNotifier:
             json={
                 "chat_id": self.chat_id,
                 "text": text,
-                "parse_mode": "Markdown",
+                "parse_mode": "HTML",
                 "disable_web_page_preview": False,
             },
             timeout=20,
