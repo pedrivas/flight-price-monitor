@@ -1,0 +1,44 @@
+name: monitor-passagens
+
+on:
+  schedule:
+    - cron: "17 */6 * * *"   # a cada 6h (UTC)
+  workflow_dispatch:          # botão manual
+
+permissions:
+  contents: write             # p/ commitar o history.db de volta
+
+concurrency:
+  group: monitor
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      - name: Rodar monitor
+        env:
+          PYTHONPATH: src
+          PRICE_SOURCE: ${{ vars.PRICE_SOURCE || 'fastflights' }}
+          TRAVELPAYOUTS_TOKEN: ${{ secrets.TRAVELPAYOUTS_TOKEN }}
+          TRAVELPAYOUTS_MARKER: ${{ secrets.TRAVELPAYOUTS_MARKER }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python -m monitor.main
+
+      - name: Persistir histórico
+        run: |
+          git config user.name  "monitor-bot"
+          git config user.email "monitor-bot@users.noreply.github.com"
+          git add -f data/history.db || true
+          git commit -m "chore: atualiza histórico de preços [skip ci]" || echo "sem mudanças"
+          git push || true
