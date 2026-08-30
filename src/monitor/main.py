@@ -26,6 +26,7 @@ def run(dry_run: bool = False, source_name: str = "fastflights") -> int:
     source = get_source(source_name)
     storage = Storage()
     notifier = None  # criado sob demanda, só quando há alerta a enviar
+    delivery_broken = False  # 1ª falha de envio rebaixa o resto para só-impressão
 
     alerts = 0
     for route in routes:
@@ -47,13 +48,16 @@ def run(dry_run: bool = False, source_name: str = "fastflights") -> int:
 
         if decision.should_alert:
             msg = format_alert(route, cheapest, decision)
-            if dry_run:
-                print("---- ALERTA (dry-run) ----\n" + msg + "\n--------------------------")
+            if dry_run or delivery_broken:
+                print("---- ALERTA (não enviado) ----\n" + msg + "\n------------------------------")
             else:
-                if notifier is None:
-                    notifier = TelegramNotifier()
-                notifier.send(msg)
-                storage.mark_alerted(cheapest.route_key, cheapest.price)
+                try:
+                    notifier = notifier or TelegramNotifier()
+                    notifier.send(msg)
+                    storage.mark_alerted(cheapest.route_key, cheapest.price)
+                except Exception as exc:
+                    delivery_broken = True
+                    print(f"[aviso] alerta não enviado ({exc}):\n{msg}", file=sys.stderr)
             alerts += 1
 
     print(f"[done] {len(routes)} rotas, {alerts} alerta(s)")

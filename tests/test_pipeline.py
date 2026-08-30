@@ -37,7 +37,7 @@ def test_run_with_fake_source(tmp_path, monkeypatch, capsys):
 
     assert alerts == 1
     out = capsys.readouterr().out
-    assert "ALERTA (dry-run)" in out
+    assert "ALERTA (não enviado)" in out
     assert "Pipeline test" in out
 
 
@@ -51,6 +51,20 @@ def test_run_dry_does_not_need_telegram_env(tmp_path, monkeypatch):
 
     # não deve levantar KeyError por falta de secrets
     assert main_mod.run(dry_run=True, source_name="fake") == 1
+
+
+def test_real_run_without_telegram_degrades_instead_of_crashing(tmp_path, monkeypatch, capsys):
+    routes_file = tmp_path / "routes.yaml"
+    routes_file.write_text(ROUTES_YAML, encoding="utf-8")
+    monkeypatch.setattr(main_mod, "load_routes", lambda: load_routes(routes_file))
+    monkeypatch.setenv("MONITOR_DB_PATH", str(tmp_path / "history.db"))
+    monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
+    monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)
+
+    alerts = main_mod.run(dry_run=False, source_name="fake")  # não deve levantar
+
+    assert alerts == 1
+    assert "não enviado" in capsys.readouterr().err
 
 
 def test_history_is_persisted(tmp_path, monkeypatch):
