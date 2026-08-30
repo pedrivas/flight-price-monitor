@@ -1,0 +1,32 @@
+# Rotas monitoradas. Cada item gera uma busca por execução.
+#
+# origin / dest: código IATA do aeroporto ou cidade (ex: GRU, REC, LIS)
+# depart_range: janela de datas de ida a varrer (a busca testa alguns dias dentro dela)
+# return_after_days: [min, max] noites de viagem (omita para só-ida)
+# adults: nº de passageiros
+# target_price: dispara alerta se o preço <= esse valor (na moeda de `currency`)
+# drop_pct: dispara também se o preço cair >= esse % vs. a mediana dos últimos 30 dias
+# nonstop: true = só voos diretos
+
+currency: BRL
+
+routes:
+  - name: "São Paulo → Recife"
+    origin: GRU
+    dest: REC
+    depart_range: ["2026-11-05", "2026-11-20"]
+    return_after_days: [5, 9]
+    adults: 1
+    target_price: 900
+    drop_pct: 20
+    nonstop: false
+
+  - name: "São Paulo → Lisboa"
+    origin: GRU
+    dest: LIS
+    depart_range: ["2027-02-01", "2027-02-15"]
+    return_after_days: [10, 21]
+    adults: 2
+    target_price: 9000
+    drop_pct: 25
+    nonstop: false
