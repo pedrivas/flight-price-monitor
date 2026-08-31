@@ -107,6 +107,18 @@ commits `data/history.db` back to keep the baseline — see
 - [ADR-004: GitHub Actions as Scheduler and History Store](docs/adr/ADR-004-github-actions-scheduler.md)
 - [ADR-005: LLM-Based Promo Classification — Deferred](docs/adr/ADR-005-llm-promo-classification-deferred.md)
 
+## One-off destination sweep
+
+The monitor watches fixed routes. To scan many destinations from one origin for a
+round trip under a budget (e.g. "anywhere from São Paulo under R$ 1800"):
+
+```bash
+PYTHONPATH=src python scripts/explore.py 1800   # budget is optional, default 1800
+```
+
+Edit the `DESTS` / `DEPARTS` / `RETURNS` lists at the top of the script. It is a
+throwaway helper, not wired into the pipeline.
+
 ## Adding a price source
 
 Implement `PriceSource.search()` in `src/monitor/sources/`, register it in
