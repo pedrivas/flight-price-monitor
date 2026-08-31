@@ -31,19 +31,19 @@ def run_sweep(storage: Storage, dry_run: bool = False, source_name: str = "fastf
     routes = storage.list_routes(active_only=True)
     alerts = 0
     for route in routes:
+        # busca + leitura/gravação no banco: uma falha aqui não derruba as outras rotas
         try:
             offers = source.search(route)
+            if not offers:
+                print(f"[info] {route.name}: nenhuma oferta")
+                continue
+            cheapest = min(offers, key=lambda o: o.price)
+            decision = evaluate(route, cheapest, storage)  # antes de gravar: baseline sem a obs. atual
+            storage.record(cheapest)
         except Exception:
-            print(f"[erro] falha ao buscar {route.name}:\n{traceback.format_exc()}", file=sys.stderr)
+            print(f"[erro] {route.name}:\n{traceback.format_exc()}", file=sys.stderr)
             continue
 
-        if not offers:
-            print(f"[info] {route.name}: nenhuma oferta")
-            continue
-
-        cheapest = min(offers, key=lambda o: o.price)
-        decision = evaluate(route, cheapest, storage)  # antes de gravar: baseline sem a obs. atual
-        storage.record(cheapest)
         base = f"{decision.baseline:.0f}" if decision.baseline is not None else "s/ histórico"
         print(f"[info] {route.name}: menor {cheapest.currency} {cheapest.price:.0f} (mediana 30d: {base})")
 
