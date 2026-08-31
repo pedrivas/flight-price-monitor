@@ -8,16 +8,19 @@ for the interview-topic map and [`docs/adr/`](docs/adr/) for the decisions.
 
 ## Architecture
 
+One GitHub Actions workflow runs a "tick" every ~15 minutes ([ADR-006](docs/adr/ADR-006-interactive-bot-and-polling-runtime.md)):
+
 ```
-Scheduler (GitHub Actions / cron)
-   └─ Collector    — a PriceSource queries live fares
-        └─ Storage — SQLite: price history + 30-day baseline
-             └─ Rules — target price OR drop vs. baseline, with dedupe
-                  └─ Notifier — Telegram message + Google Flights link
+tick
+ ├─ bot        — Telegram getUpdates → /monitorias /criar /editar /excluir
+ └─ if ≥6h since last sweep:
+      Collector (PriceSource) → Storage (SQLite) → Rules → Notifier (Telegram)
 ```
 
-The collector is the only pluggable stage. Everything downstream works on the
-normalized `Offer` model (see [ADR-002](docs/adr/ADR-002-pluggable-price-source-interface.md)).
+The collector is the only pluggable stage; downstream works on the normalized
+`Offer` model ([ADR-002](docs/adr/ADR-002-pluggable-price-source-interface.md)).
+All state — price history, the route list, and the bot's read offset — lives in
+`data/history.db`, which the workflow commits back after every tick.
 
 ## Price sources
 
@@ -32,12 +35,28 @@ Amadeus Self-Service was decommissioned on 2026-07-17 — see
 
 ## How it works
 
-1. `config/routes.yaml` lists the monitored routes.
-2. Each run, the collector fetches fares and stores the cheapest in `data/history.db`.
-3. `rules.py` alerts when `price <= target_price` **or**
-   `price <= median_30d * (1 - drop_pct%)`.
+1. Routes are seeded once from `config/routes.yaml` into the `routes` table; from
+   then on you manage them from Telegram.
+2. When a sweep is due, the collector fetches fares and stores the cheapest,
+   keyed by the route row id (so editing a route keeps its history).
+3. It alerts when `price <= target_price` **or** `price <= median_30d * (1 - drop_pct%)`.
 4. Dedupe: the same promo is not re-sent (fares within 2% over the last 7 days).
-5. `notifier.py` sends a Telegram message with a Google Flights link.
+5. A Telegram message goes out with a Google Flights link.
+
+## Bot commands
+
+Send these to the bot (or the group) from a chat listed in `TELEGRAM_ALLOWED_CHAT_IDS`
+(defaults to `TELEGRAM_CHAT_ID`):
+
+| Command | |
+|---|---|
+| `/monitorias` | list active monitors |
+| `/criar GRU BEL 2026-09-04..2026-09-11 7-21 1700 15` | create (`ORIG DEST IDA_DE..IDA_ATE NIGHTS TARGET [DROP%] [--nonstop] [--pax N]`; `NIGHTS = -` for one-way) |
+| `/editar 3 alvo 1600` | edit a field: `nome alvo drop pax nonstop ida_de ida_ate noites` |
+| `/excluir 3` | remove (confirm with `/excluir 3 sim`) |
+| `/pausar 3` · `/ativar 3` | toggle without deleting |
+
+Commands are processed on the next tick (0–15 min).
 
 ## Running locally
 
@@ -47,9 +66,10 @@ pip install -r requirements.txt
 cp .env.example .env        # fill in the Telegram values
 
 export PYTHONPATH=src
-python -m monitor.main --dry-run --source fake   # smoke test, no network
-python -m monitor.main --dry-run                 # real fares, nothing sent
-python -m monitor.main                           # real run
+python -m monitor.main --sweep-now --dry-run --source fake --no-bot  # smoke test, no network
+python -m monitor.main --bot-only                # handle Telegram commands only
+python -m monitor.main --sweep-now --dry-run     # real fares, nothing sent
+python -m monitor.main                           # a real tick
 ```
 
 **Telegram:** create a bot with [@BotFather](https://t.me/BotFather), send it
@@ -62,50 +82,40 @@ pip install -r requirements-dev.txt
 python -m pytest -q
 ```
 
-Covers date sampling, the SQLite baseline/dedupe logic, alert rules, config
-parsing and validation, Telegram message formatting (HTML escaping), and the
-`run()` pipeline end to end with the `fake` source. CI runs them on every push
-and PR (`.github/workflows/ci.yml`).
+Covers date sampling, the SQLite baseline/dedupe logic, the route store, alert
+rules, config parsing, Telegram formatting, bot command handling, and the tick
+pipeline with the `fake` source. CI runs them on every push and PR
+(`.github/workflows/ci.yml`).
 
 ## Configuring routes
 
-Edit `config/routes.yaml`. Per-route fields:
+First run only: `config/routes.yaml` seeds the `routes` table. Per-route fields:
+`origin`/`dest` (IATA), `depart_range` `[start, end]` outbound window,
+`return_after_days` `[min, max]` nights (omit for one-way), `adults`,
+`target_price`, `drop_pct`, `nonstop`. Dates must be in the **future**.
 
-| Field | Meaning |
-|---|---|
-| `origin` / `dest` | IATA code (airport or city) |
-| `depart_range` | `[start, end]` outbound window; ~4 dates are sampled inside it |
-| `return_after_days` | `[min, max]` trip length in nights (omit for one-way) |
-| `adults` | passenger count (alert price is the **total**, not per person) |
-| `target_price` | alert if price ≤ this value (in `currency`) |
-| `drop_pct` | also alert if price falls ≥ this % vs. the 30-day median |
-| `nonstop` | `true` = direct flights only |
-
-Dates must be in the **future** — Google Flights returns nothing for past dates.
+After the first run, use the bot commands above — the DB is the source of truth
+and the YAML is ignored.
 
 ## Scheduling
 
-**GitHub Actions** (free): `.github/workflows/monitor.yml` runs every 6h and
-commits `data/history.db` back to keep the baseline — see
-[ADR-004](docs/adr/ADR-004-github-actions-scheduler.md). Configure under
-*Settings → Secrets and variables → Actions*:
+**GitHub Actions** (free on public repos): `.github/workflows/monitor.yml` runs
+the tick every 15 min and commits `data/history.db` back — see
+[ADR-006](docs/adr/ADR-006-interactive-bot-and-polling-runtime.md). Configure
+under *Settings → Secrets and variables → Actions*:
 
 - Secrets: `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` (and `TRAVELPAYOUTS_*` if used)
-- Variable (optional): `PRICE_SOURCE` (default `fastflights`)
-
-**Local cron:**
-
-```cron
-17 */6 * * * cd /path/flight-price-monitor && PYTHONPATH=src .venv/bin/python -m monitor.main
-```
+- Variables (optional): `PRICE_SOURCE` (default `fastflights`),
+  `TELEGRAM_ALLOWED_CHAT_IDS` (default `TELEGRAM_CHAT_ID`)
 
 ## Architecture Decision Records
 
 - [ADR-001: Live Price Source Selection](docs/adr/ADR-001-live-price-source-selection.md)
 - [ADR-002: Pluggable Price Source Interface](docs/adr/ADR-002-pluggable-price-source-interface.md)
 - [ADR-003: Historical Baseline Alerting and Dedupe](docs/adr/ADR-003-historical-baseline-alerting.md)
-- [ADR-004: GitHub Actions as Scheduler and History Store](docs/adr/ADR-004-github-actions-scheduler.md)
+- [ADR-004: GitHub Actions as Scheduler and History Store](docs/adr/ADR-004-github-actions-scheduler.md) *(superseded by ADR-006)*
 - [ADR-005: LLM-Based Promo Classification — Deferred](docs/adr/ADR-005-llm-promo-classification-deferred.md)
+- [ADR-006: Interactive Bot via Polling in the Existing Workflow](docs/adr/ADR-006-interactive-bot-and-polling-runtime.md)
 
 ## One-off destination sweep
 
@@ -129,7 +139,7 @@ Implement `PriceSource.search()` in `src/monitor/sources/`, register it in
 - `fastflights` depends on Google Flights' front-end; if it stops returning data,
   `fast-flights` has paid integrations (BrightData / SearchApi) as a fallback.
 - ~4 dates sampled per window to avoid hammering the source; tune in
-  `sources/fastflights.py` (`_sample_dates`).
+  `monitor/dates.py` (`sample_dates`). Round trips test one trip length (window midpoint).
 - Round-trip stop count reflects the outbound leg only.
 - No direct booking link; alerts link to a Google Flights search.
 - For WhatsApp instead of Telegram: swap `notifier.py` for a WhatsApp Cloud API
