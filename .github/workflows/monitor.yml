@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
     inputs:
       command:
-        description: "Comando do bot pra executar agora (ex: /excluir 3). Vazio = tick normal."
+        description: "Comando do bot pra executar agora, sem a barra (ex: excluir 3). Vazio = tick normal."
         required: false
         default: ""
 

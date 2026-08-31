@@ -59,14 +59,16 @@ Send these to the bot (or the group) from a chat listed in `TELEGRAM_ALLOWED_CHA
 Commands are processed on the next tick (typically 0–20 min; GitHub cron is best-effort — see ADR-006).
 
 **Faster path**, no Telegram round-trip: run a single command on demand via
-`workflow_dispatch` (~40 s):
+`workflow_dispatch` (~40 s). Use the command **without** the leading slash — it's
+optional here and a bare `/word` gets mangled by Git Bash on Windows:
 
 ```bash
-gh workflow run monitor-passagens -f command="/excluir 3"
+gh workflow run monitor-passagens -f command="excluir 3"
 ```
 
 or the GitHub UI/mobile app: *Actions → monitor-passagens → Run workflow*, fill the
-`command` field. The reply is printed in the run log and echoed to the group.
+`command` field (`monitorias`, `excluir 3`, `criar GRU FOR ...`). The reply is
+printed in the run log and echoed to the group.
 
 ## Running locally
 
