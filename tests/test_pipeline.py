@@ -1,82 +1,86 @@
 from __future__ import annotations
 
+from datetime import date
+
 import pytest
 
 import monitor.main as main_mod
-from monitor.config import load_routes
+from conftest import seed_route
+from monitor.models import RouteQuery
+from monitor.storage import Storage
 
 
 @pytest.fixture(autouse=True)
 def _deterministic_fake(monkeypatch):
-    # fixa o fator aleatório da fonte fake: preço = base * 0.7
     monkeypatch.setattr("monitor.sources.fake.random.uniform", lambda a, b: 0.7)
     monkeypatch.setattr("monitor.sources.fake.random.choice", lambda seq: seq[0])
 
-ROUTES_YAML = """
-currency: BRL
-routes:
-  - name: "Pipeline test"
-    origin: GRU
-    dest: REC
-    depart_range: ["2026-11-05", "2026-11-20"]
-    return_after_days: [5, 9]
-    adults: 1
-    target_price: 999999      # garante alerta com a fonte fake
-    drop_pct: 20
-"""
 
-
-def test_run_with_fake_source(tmp_path, monkeypatch, capsys):
-    routes_file = tmp_path / "routes.yaml"
-    routes_file.write_text(ROUTES_YAML, encoding="utf-8")
-
-    monkeypatch.setattr(main_mod, "load_routes", lambda: load_routes(routes_file))
-    monkeypatch.setenv("MONITOR_DB_PATH", str(tmp_path / "history.db"))
-
-    alerts = main_mod.run(dry_run=True, source_name="fake")
-
+def test_run_sweep_alerts_and_prints(tmp_path, capsys):
+    storage = Storage(tmp_path / "h.db")
+    seed_route(storage, name="Pipeline test")
+    alerts = main_mod.run_sweep(storage, dry_run=True, source_name="fake")
     assert alerts == 1
     out = capsys.readouterr().out
-    assert "ALERTA (não enviado)" in out
-    assert "Pipeline test" in out
+    assert "ALERTA (não enviado)" in out and "Pipeline test" in out
 
 
-def test_run_dry_does_not_need_telegram_env(tmp_path, monkeypatch):
-    routes_file = tmp_path / "routes.yaml"
-    routes_file.write_text(ROUTES_YAML, encoding="utf-8")
-    monkeypatch.setattr(main_mod, "load_routes", lambda: load_routes(routes_file))
-    monkeypatch.setenv("MONITOR_DB_PATH", str(tmp_path / "history.db"))
-    monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
-    monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)
-
-    # não deve levantar KeyError por falta de secrets
-    assert main_mod.run(dry_run=True, source_name="fake") == 1
+def test_run_sweep_records_history_under_id_key(tmp_path):
+    storage = Storage(tmp_path / "h.db")
+    rid = seed_route(storage)
+    main_mod.run_sweep(storage, dry_run=True, source_name="fake")
+    n = storage.conn.execute(
+        "SELECT COUNT(*) FROM price_history WHERE route_key=?", (f"r{rid}",)
+    ).fetchone()[0]
+    assert n == 1
 
 
-def test_real_run_without_telegram_degrades_instead_of_crashing(tmp_path, monkeypatch, capsys):
-    routes_file = tmp_path / "routes.yaml"
-    routes_file.write_text(ROUTES_YAML, encoding="utf-8")
-    monkeypatch.setattr(main_mod, "load_routes", lambda: load_routes(routes_file))
-    monkeypatch.setenv("MONITOR_DB_PATH", str(tmp_path / "history.db"))
-    monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
-    monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)
-
-    alerts = main_mod.run(dry_run=False, source_name="fake")  # não deve levantar
-
+def test_real_sweep_without_telegram_degrades(tmp_path, capsys):
+    storage = Storage(tmp_path / "h.db")
+    seed_route(storage)
+    alerts = main_mod.run_sweep(storage, dry_run=False, source_name="fake")  # não deve levantar
     assert alerts == 1
     assert "não enviado" in capsys.readouterr().err
 
 
-def test_history_is_persisted(tmp_path, monkeypatch):
-    routes_file = tmp_path / "routes.yaml"
-    routes_file.write_text(ROUTES_YAML, encoding="utf-8")
-    monkeypatch.setattr(main_mod, "load_routes", lambda: load_routes(routes_file))
-    db = tmp_path / "history.db"
+def test_tick_gates_sweep_by_interval(tmp_path, monkeypatch):
+    db = tmp_path / "h.db"
     monkeypatch.setenv("MONITOR_DB_PATH", str(db))
+    monkeypatch.setattr(
+        main_mod, "load_routes_from_yaml",
+        lambda *a: [RouteQuery(
+            name="R", origin="GRU", dest="REC",
+            depart_range=(date(2026, 11, 5), date(2026, 11, 20)),
+            return_after_days=(5, 9), target_price=999999.0, drop_pct=20.0,
+        )],
+    )
 
-    main_mod.run(dry_run=True, source_name="fake")
+    def count() -> int:
+        return Storage(db).conn.execute("SELECT COUNT(*) FROM price_history").fetchone()[0]
 
-    import sqlite3
+    main_mod.tick(dry_run=True, source_name="fake", skip_bot=True)   # sem last_sweep → roda
+    assert count() == 1 and Storage(db).kv_get("last_sweep_at")
 
-    n = sqlite3.connect(db).execute("SELECT COUNT(*) FROM price_history").fetchone()[0]
-    assert n == 1
+    main_mod.tick(dry_run=True, source_name="fake", skip_bot=True)   # dentro do intervalo → pula
+    assert count() == 1
+
+    main_mod.tick(dry_run=True, source_name="fake", skip_bot=True, force_sweep=True)
+    assert count() == 2
+
+
+def test_tick_seeds_routes_from_yaml_once(tmp_path, monkeypatch):
+    db = tmp_path / "h.db"
+    monkeypatch.setenv("MONITOR_DB_PATH", str(db))
+    seed = [RouteQuery(
+        name="Semeada", origin="GRU", dest="REC",
+        depart_range=(date(2026, 11, 5), date(2026, 11, 20)),
+        return_after_days=(5, 9), target_price=999999.0,
+    )]
+    monkeypatch.setattr(main_mod, "load_routes_from_yaml", lambda *a: seed)
+
+    main_mod.tick(dry_run=True, source_name="fake", skip_bot=True, skip_sweep=True)
+    assert [r.name for r in Storage(db).list_routes()] == ["Semeada"]
+
+    # segunda chamada não duplica
+    main_mod.tick(dry_run=True, source_name="fake", skip_bot=True, skip_sweep=True)
+    assert len(Storage(db).list_routes()) == 1
