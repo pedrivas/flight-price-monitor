@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sys
 import time
 from datetime import date, timedelta
 
@@ -63,9 +64,8 @@ class FastFlightsSource(PriceSource):
                 language=self.language,
             )
 
-            try:
-                results = get_flights(query)
-            except FlightsNotFound:
+            results = self._fetch(query, f"{route.name} {dep}")
+            if results is None:
                 continue
 
             for fl in results:
@@ -86,3 +86,17 @@ class FastFlightsSource(PriceSource):
             time.sleep(self.pause_s)  # gentileza com o Google
 
         return offers
+
+    def _fetch(self, query, label: str):
+        """get_flights com retry. O parser da lib levanta IndexError/KeyError em
+        algumas respostas do Google — quase sempre transitório."""
+        for attempt in range(3):
+            try:
+                return get_flights(query)
+            except FlightsNotFound:
+                return None
+            except Exception as exc:  # parser frágil da fast-flights
+                if attempt == 2:
+                    print(f"[aviso] fastflights falhou em {label}: {exc}", file=sys.stderr)
+                    return None
+                time.sleep(1.5 * (attempt + 1))
