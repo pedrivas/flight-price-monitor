@@ -15,7 +15,13 @@ def _as_date(value) -> date:
     return value if isinstance(value, date) else date.fromisoformat(str(value))
 
 
-def load_routes(path: Path = CONFIG_PATH) -> list[RouteQuery]:
+def has_no_alert_criteria(route: RouteQuery) -> bool:
+    return route.target_price is None and route.drop_pct is None
+
+
+def load_routes_from_yaml(path: Path = CONFIG_PATH) -> list[RouteQuery]:
+    """Lê o routes.yaml. Usado só para semear a tabela `routes` na primeira
+    execução (e nos testes); em runtime as rotas vêm do banco."""
     raw = yaml.safe_load(path.read_text(encoding="utf-8"))
     currency = raw.get("currency", "BRL")
     routes: list[RouteQuery] = []
@@ -38,7 +44,7 @@ def load_routes(path: Path = CONFIG_PATH) -> list[RouteQuery]:
         )
 
     for route in routes:
-        if route.target_price is None and route.drop_pct is None:
+        if has_no_alert_criteria(route):
             print(
                 f"[aviso] rota '{route.name}' não tem target_price nem drop_pct "
                 f"— nunca vai gerar alerta",
