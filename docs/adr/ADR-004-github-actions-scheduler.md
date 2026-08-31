@@ -1,7 +1,11 @@
 # ADR-004: GitHub Actions as Scheduler and History Store
 
-**Status:** Accepted
+**Status:** Superseded by [ADR-006](ADR-006-interactive-bot-and-polling-runtime.md)
 **Date:** 2026-08-30
+
+> The GitHub Actions + committed-SQLite model still holds. ADR-006 only changes
+> the cadence (every 15 min instead of every 6h) and adds Telegram command
+> handling to the same workflow.
 
 ## Context
 

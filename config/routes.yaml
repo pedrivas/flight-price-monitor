@@ -1,4 +1,6 @@
-# Rotas monitoradas. Cada item gera uma busca por execução.
+# SEED das rotas monitoradas — importado UMA VEZ, na primeira execução, para a
+# tabela `routes` do data/history.db. Depois disso a fonte da verdade é o banco;
+# edite pelo Telegram (/criar, /editar, /excluir). Ver ADR-006.
 #
 # origin / dest: código IATA do aeroporto ou cidade (ex: GRU, REC, LIS)
 # depart_range: janela de datas de ida a varrer (a busca testa alguns dias dentro dela)
