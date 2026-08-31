@@ -13,21 +13,22 @@ for _stream in (sys.stdout, sys.stderr):
     except (AttributeError, ValueError):
         pass
 
-from .config import load_routes
+from .bot import poll_and_handle
+from .config import CONFIG_PATH, load_routes_from_yaml
 from .notifier import TelegramNotifier, format_alert
 from .rules import evaluate
 from .sources import get_source
 from .storage import Storage
 
+SWEEP_INTERVAL_H = 6
 
-def run(dry_run: bool = False, source_name: str = "fastflights") -> int:
-    load_dotenv()
-    routes = load_routes()
+
+def run_sweep(storage: Storage, dry_run: bool = False, source_name: str = "fastflights") -> int:
     source = get_source(source_name)
-    storage = Storage()
     notifier = None  # criado sob demanda, só quando há alerta a enviar
     delivery_broken = False  # 1ª falha de envio rebaixa o resto para só-impressão
 
+    routes = storage.list_routes(active_only=True)
     alerts = 0
     for route in routes:
         try:
@@ -64,12 +65,50 @@ def run(dry_run: bool = False, source_name: str = "fastflights") -> int:
     return alerts
 
 
+def tick(
+    dry_run: bool = False,
+    source_name: str = "fastflights",
+    force_sweep: bool = False,
+    skip_bot: bool = False,
+    skip_sweep: bool = False,
+) -> None:
+    load_dotenv()
+    storage = Storage()
+    storage.seed_routes(load_routes_from_yaml(CONFIG_PATH))
+
+    if not skip_bot:
+        try:
+            n = poll_and_handle(storage)
+            if n:
+                print(f"[bot] {n} comando(s) tratado(s)")
+        except Exception:
+            print(f"[erro] bot:\n{traceback.format_exc()}", file=sys.stderr)  # nunca bloqueia a varredura
+
+    if skip_sweep:
+        return
+    due = force_sweep or storage.hours_since_last_sweep() >= SWEEP_INTERVAL_H
+    if not due:
+        print(f"[info] varredura pulada ({storage.hours_since_last_sweep():.1f}h desde a última)")
+        return
+    run_sweep(storage, dry_run=dry_run, source_name=source_name)
+    storage.mark_sweep_done()
+
+
 def main() -> None:
     p = argparse.ArgumentParser(description="Monitor de passagens em promoção")
-    p.add_argument("--dry-run", action="store_true", help="não envia no Telegram, só imprime")
+    p.add_argument("--dry-run", action="store_true", help="não envia alertas no Telegram")
     p.add_argument("--source", default=os.environ.get("PRICE_SOURCE", "fastflights"))
+    p.add_argument("--sweep-now", action="store_true", help="força a varredura de preços agora")
+    p.add_argument("--no-bot", action="store_true", help="não processa comandos do Telegram")
+    p.add_argument("--bot-only", action="store_true", help="só processa comandos, sem varredura")
     args = p.parse_args()
-    run(dry_run=args.dry_run, source_name=args.source)
+    tick(
+        dry_run=args.dry_run,
+        source_name=args.source,
+        force_sweep=args.sweep_now,
+        skip_bot=args.no_bot,
+        skip_sweep=args.bot_only,
+    )
 
 
 if __name__ == "__main__":
