@@ -4,7 +4,7 @@
 **Date:** 2026-08-30
 
 > The GitHub Actions + committed-SQLite model still holds. ADR-006 only changes
-> the cadence (every 15 min instead of every 6h) and adds Telegram command
+> the cadence (~every 20 min instead of every 6h) and adds Telegram command
 > handling to the same workflow.
 
 ## Context

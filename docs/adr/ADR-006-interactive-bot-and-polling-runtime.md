@@ -21,8 +21,8 @@ Two facts shape the decision:
 
 ## Decision
 
-Keep everything in **one GitHub Actions workflow**, but run it **every 15 minutes**
-instead of every 6 hours. Each run (`python -m monitor.main`, a "tick"):
+Keep everything in **one GitHub Actions workflow**, but run it **about every 20
+minutes** (cron `7,27,47 * * * *`) instead of every 6 hours. Each run (`python -m monitor.main`, a "tick"):
 
 1. `poll_and_handle` — one `getUpdates` call; execute any pending commands, reply.
 2. If `hours_since_last_sweep() >= 6` → run the price sweep + alerts, then stamp
@@ -45,15 +45,17 @@ Command parsing is deliberately minimal: one-line syntax, hand-rolled parser, no
 
 **Positive:**
 - Still zero infra, zero cost. No new account, one language, one repo.
-- Command latency 0–15 min — fine for the interaction frequency.
+- Command latency ~0–20 min in the good case — fine for the interaction frequency.
 - Single writer to the SQLite file (one workflow), so no commit races.
 - The command handler (`bot.handle_message`) is pure and unit-tested; only the
   transport would change if we ever move to a webhook.
 
 **Negative:**
-- The Actions tab gets ~96 runs/day (filterable, but noisy).
-- GitHub throttles frequent schedules on free runners — effective cadence may be
-  15–25 min at peak.
+- The Actions tab gets ~72 runs/day (filterable, but noisy).
+- GitHub throttles frequent schedules hard: right after this change the cron
+  skipped for over an hour. Offset minutes (not the top of the hour) and a
+  20-min spacing help but guarantee nothing. If responsiveness matters, this is
+  the trigger to take the graduation path below.
 - `routes.yaml` is no longer the source of truth once the DB is seeded; it can
   drift from reality. It stays as documentation / disaster-recovery seed.
 - Pre-existing history under the old string keys is orphaned (days of test data,
@@ -65,7 +67,7 @@ Command parsing is deliberately minimal: one-line syntax, hand-rolled parser, no
   Fly.io / Oracle Cloud Always Free / a Raspberry Pi). Best UX (instant replies).
   Rejected for now: needs a machine running 24/7 and breaks the zero-infra
   property for a feature used a few times a week. This is the natural graduation
-  path if the 15-min latency becomes annoying.
+  path if the latency (or the cron skipping) becomes annoying.
 - **Cloudflare Workers webhook + D1/KV.** Instant, free, no 24/7 host. Rejected:
   splits state to Cloudflare, adds a second language/runtime and account for a
   small tool. Kept as a fallback.

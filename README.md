@@ -8,7 +8,7 @@ for the interview-topic map and [`docs/adr/`](docs/adr/) for the decisions.
 
 ## Architecture
 
-One GitHub Actions workflow runs a "tick" every ~15 minutes ([ADR-006](docs/adr/ADR-006-interactive-bot-and-polling-runtime.md)):
+One GitHub Actions workflow runs a "tick" every ~20 minutes ([ADR-006](docs/adr/ADR-006-interactive-bot-and-polling-runtime.md)):
 
 ```
 tick
@@ -56,7 +56,7 @@ Send these to the bot (or the group) from a chat listed in `TELEGRAM_ALLOWED_CHA
 | `/excluir 3` | remove (confirm with `/excluir 3 sim`) |
 | `/pausar 3` · `/ativar 3` | toggle without deleting |
 
-Commands are processed on the next tick (0–15 min).
+Commands are processed on the next tick (typically 0–20 min; GitHub cron is best-effort — see ADR-006).
 
 ## Running locally
 
@@ -100,7 +100,7 @@ and the YAML is ignored.
 ## Scheduling
 
 **GitHub Actions** (free on public repos): `.github/workflows/monitor.yml` runs
-the tick every 15 min and commits `data/history.db` back — see
+the tick roughly every 20 min and commits `data/history.db` back — see
 [ADR-006](docs/adr/ADR-006-interactive-bot-and-polling-runtime.md). Configure
 under *Settings → Secrets and variables → Actions*:
 

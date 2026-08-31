@@ -13,10 +13,10 @@ one would fit and why it was deferred.
 ## Architecture
 
 One GitHub Actions workflow runs `python -m monitor.main` — a "tick" — every
-15 minutes (ADR-006):
+~20 minutes (ADR-006):
 
 ```
-tick (every ~15 min)
+tick (every ~20 min, best-effort)
  ├─ bot.poll_and_handle   — Telegram getUpdates → /monitorias /criar /editar /excluir
  └─ if ≥6h since last sweep:
         Collector (PriceSource)  →  Storage (SQLite)  →  Rules  →  Notifier (Telegram)
@@ -37,7 +37,7 @@ tick (every ~15 min)
 - `fast-flights` — live Google Flights data (default source)
 - SQLite — price history, route store, bot state (no server)
 - Telegram Bot API — delivery + interactive route management (hand-rolled, no lib)
-- GitHub Actions — the 15-min tick and state persistence (see ADR-006, supersedes ADR-004)
+- GitHub Actions — the ~20-min tick and state persistence (see ADR-006, supersedes ADR-004)
 
 ## Running locally
 

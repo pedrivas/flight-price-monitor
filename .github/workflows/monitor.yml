@@ -2,7 +2,9 @@ name: monitor-passagens
 
 on:
   schedule:
-    - cron: "*/15 * * * *"   # tick a cada 15 min: comandos do bot + varredura de 6h
+    # a cada ~20 min, em minutos deslocados da virada da hora (o agendador do
+    # GitHub estrangula cron frequente e no topo da hora). Ver ADR-006.
+    - cron: "7,27,47 * * * *"
   workflow_dispatch:          # botão manual
 
 permissions:
