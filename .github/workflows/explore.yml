@@ -1,0 +1,56 @@
+name: explorar
+
+on:
+  workflow_dispatch:
+    inputs:
+      origin:
+        description: "Origem (IATA)"
+        default: "GRU"
+      depart:
+        description: "Janela de ida: AAAA-MM-DD..AAAA-MM-DD"
+        required: true
+      return:
+        description: "Janela de volta: AAAA-MM-DD..AAAA-MM-DD"
+        required: true
+      max_price:
+        description: "Teto (BRL)"
+        default: "1800"
+      destinations:
+        description: "Códigos IATA separados por vírgula (vazio = lista padrão)"
+        default: ""
+
+concurrency:
+  group: explore
+  cancel-in-progress: false
+
+jobs:
+  explore:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      - name: Explorar
+        env:
+          PYTHONPATH: src
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          ORIGIN: ${{ github.event.inputs.origin }}
+          DEPART: ${{ github.event.inputs.depart }}
+          RET: ${{ github.event.inputs.return }}
+          MAXP: ${{ github.event.inputs.max_price }}
+          DESTS: ${{ github.event.inputs.destinations }}
+        run: >
+          python -m monitor.explore
+          --origin "$ORIGIN"
+          --depart "$DEPART"
+          --return "$RET"
+          --max "$MAXP"
+          --destinations "$DESTS"
