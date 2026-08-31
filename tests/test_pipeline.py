@@ -90,6 +90,21 @@ def test_tick_gates_sweep_by_interval(tmp_path, monkeypatch):
     assert count() == 2
 
 
+def test_command_flag_runs_handler_and_skips_sweep(tmp_path, monkeypatch, capsys):
+    db = tmp_path / "h.db"
+    monkeypatch.setenv("MONITOR_DB_PATH", str(db))
+    monkeypatch.setattr(main_mod, "load_routes_from_yaml", lambda *a: [])
+
+    # sem a barra inicial — run_command deve tolerar
+    main_mod.tick(command="criar GRU BEL 2026-09-04..2026-09-11 7-21 1700", dry_run=True)
+
+    s = Storage(db)
+    assert len(s.list_routes()) == 1
+    assert "criada" in capsys.readouterr().out
+    assert s.conn.execute("SELECT COUNT(*) FROM price_history").fetchone()[0] == 0  # não varreu
+    assert s.kv_get("last_sweep_at") is None
+
+
 def test_tick_seeds_routes_from_yaml_once(tmp_path, monkeypatch):
     db = tmp_path / "h.db"
     monkeypatch.setenv("MONITOR_DB_PATH", str(db))

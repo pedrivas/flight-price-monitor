@@ -13,12 +13,13 @@ for _stream in (sys.stdout, sys.stderr):
     except (AttributeError, ValueError):
         pass
 
-from .bot import poll_and_handle
+from .bot import handle_message, poll_and_handle
 from .config import CONFIG_PATH, load_routes_from_yaml
-from .notifier import TelegramNotifier, format_alert
+from .notifier import TelegramNotifier, esc, format_alert
 from .rules import evaluate
 from .sources import get_source
 from .storage import Storage
+from .telegram import TelegramClient
 
 SWEEP_INTERVAL_H = 6
 
@@ -65,16 +66,37 @@ def run_sweep(storage: Storage, dry_run: bool = False, source_name: str = "fastf
     return alerts
 
 
+def run_command(storage: Storage, command: str, dry_run: bool = False) -> str:
+    """Executa um comando do bot direto (via --command / workflow_dispatch),
+    sem passar pelo Telegram. Ecoa a resposta no grupo se der."""
+    command = command.strip()
+    if command and not command.startswith("/"):
+        command = "/" + command  # tolera 'excluir 3' no formulário do dispatch
+    reply = handle_message(command, storage) or "(sem resposta)"
+    print(reply)
+    if not dry_run:
+        try:
+            TelegramClient().send_message(f"↩️ <code>{esc(command)}</code>\n{reply}")
+        except Exception as exc:
+            print(f"[aviso] não ecoei no Telegram ({exc})", file=sys.stderr)
+    return reply
+
+
 def tick(
     dry_run: bool = False,
     source_name: str = "fastflights",
     force_sweep: bool = False,
     skip_bot: bool = False,
     skip_sweep: bool = False,
+    command: str | None = None,
 ) -> None:
     load_dotenv()
     storage = Storage()
     storage.seed_routes(load_routes_from_yaml(CONFIG_PATH))
+
+    if command:
+        run_command(storage, command, dry_run=dry_run)
+        return
 
     if not skip_bot:
         try:
@@ -101,6 +123,7 @@ def main() -> None:
     p.add_argument("--sweep-now", action="store_true", help="força a varredura de preços agora")
     p.add_argument("--no-bot", action="store_true", help="não processa comandos do Telegram")
     p.add_argument("--bot-only", action="store_true", help="só processa comandos, sem varredura")
+    p.add_argument("--command", help="executa um comando do bot agora (ex: '/excluir 3') e sai")
     args = p.parse_args()
     tick(
         dry_run=args.dry_run,
@@ -108,6 +131,7 @@ def main() -> None:
         force_sweep=args.sweep_now,
         skip_bot=args.no_bot,
         skip_sweep=args.bot_only,
+        command=args.command,
     )
 
 

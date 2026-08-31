@@ -5,7 +5,12 @@ on:
     # a cada ~20 min, em minutos deslocados da virada da hora (o agendador do
     # GitHub estrangula cron frequente e no topo da hora). Ver ADR-006.
     - cron: "7,27,47 * * * *"
-  workflow_dispatch:          # botão manual
+  workflow_dispatch:
+    inputs:
+      command:
+        description: "Comando do bot pra executar agora (ex: /excluir 3). Vazio = tick normal."
+        required: false
+        default: ""
 
 permissions:
   contents: write             # p/ commitar o history.db de volta
@@ -36,7 +41,13 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           TELEGRAM_ALLOWED_CHAT_IDS: ${{ vars.TELEGRAM_ALLOWED_CHAT_IDS }}
-        run: python -m monitor.main
+          BOT_COMMAND: ${{ github.event.inputs.command }}
+        run: |
+          if [ -n "$BOT_COMMAND" ]; then
+            python -m monitor.main --command "$BOT_COMMAND"
+          else
+            python -m monitor.main
+          fi
 
       - name: Persistir histórico
         if: always()   # salva o que foi coletado mesmo se o envio falhar

@@ -54,7 +54,8 @@ python -m monitor.main                           # a real tick (bot + sweep if d
 ```
 
 CLI flags: `--dry-run`, `--source`, `--sweep-now` (force sweep), `--no-bot`,
-`--bot-only` (skip sweep).
+`--bot-only` (skip sweep), `--command "/excluir 3"` (run one bot command and exit —
+also exposed as the `command` input on the `monitor-passagens` workflow_dispatch).
 
 Tests: `pip install -r requirements-dev.txt && python -m pytest -q`
 (pytest reads `pyproject.toml`, which puts `src/` on the path). `MONITOR_DB_PATH`
