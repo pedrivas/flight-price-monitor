@@ -12,6 +12,7 @@ from monitor.storage import Storage
 def _hermetic_env(monkeypatch):
     """Tests never touch a real .env or real Telegram credentials."""
     monkeypatch.setattr("monitor.main.load_dotenv", lambda *a, **k: None)
+    monkeypatch.setattr("monitor.explore.load_dotenv", lambda *a, **k: None)
     monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
     monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)
     monkeypatch.delenv("TELEGRAM_ALLOWED_CHAT_IDS", raising=False)
