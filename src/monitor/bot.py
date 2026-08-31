@@ -112,7 +112,7 @@ def cmd_list(args, storage) -> str:
     return "📋 <b>Monitorias ativas</b>\n\n" + "\n\n".join(_route_line(r, storage) for r in routes)
 
 
-def cmd_criar(args, storage) -> str:
+def cmd_create(args, storage) -> str:
     if len(args) < 5:
         raise CommandError("faltam argumentos.\n\n" + HELP)
     origin = _airport(args[0])
@@ -166,7 +166,7 @@ _EDIT_FIELDS = {
 }
 
 
-def cmd_editar(args, storage) -> str:
+def cmd_edit(args, storage) -> str:
     if len(args) < 3:
         raise CommandError("uso: /editar ID CAMPO VALOR")
     route_id = _int_id(args[0])
@@ -197,7 +197,7 @@ def cmd_editar(args, storage) -> str:
     return f"✏️ #{route_id} atualizada.\n\n{_route_line(storage.get_route(route_id), storage)}"
 
 
-def cmd_excluir(args, storage) -> str:
+def cmd_delete(args, storage) -> str:
     if not args:
         raise CommandError("uso: /excluir ID")
     route_id = _int_id(args[0])
@@ -210,11 +210,11 @@ def cmd_excluir(args, storage) -> str:
     return f"🗑️ Monitoria #{route_id} removida."
 
 
-def cmd_pausar(args, storage) -> str:
+def cmd_pause(args, storage) -> str:
     return _toggle(args, storage, active=False, verb="pausada")
 
 
-def cmd_ativar(args, storage) -> str:
+def cmd_activate(args, storage) -> str:
     return _toggle(args, storage, active=True, verb="reativada")
 
 
@@ -241,10 +241,10 @@ def _flag(s: str) -> bool:
 COMMANDS = {
     "start": cmd_help, "help": cmd_help, "ajuda": cmd_help,
     "monitorias": cmd_list, "listar": cmd_list, "list": cmd_list,
-    "criar": cmd_criar, "novo": cmd_criar,
-    "editar": cmd_editar,
-    "excluir": cmd_excluir, "remover": cmd_excluir,
-    "pausar": cmd_pausar, "ativar": cmd_ativar,
+    "criar": cmd_create, "novo": cmd_create,
+    "editar": cmd_edit,
+    "excluir": cmd_delete, "remover": cmd_delete,
+    "pausar": cmd_pause, "ativar": cmd_activate,
 }
 
 

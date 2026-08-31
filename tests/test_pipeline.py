@@ -35,6 +35,28 @@ def test_run_sweep_records_history_under_id_key(tmp_path):
     assert n == 1
 
 
+def test_run_sweep_survives_one_route_db_error(tmp_path, monkeypatch, capsys):
+    import sqlite3
+
+    storage = Storage(tmp_path / "h.db")
+    seed_route(storage, name="Rota A")
+    seed_route(storage, name="Rota B")
+
+    real_record, calls = storage.record, {"n": 0}
+
+    def flaky(offer):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise sqlite3.OperationalError("disk I/O error")
+        return real_record(offer)
+
+    monkeypatch.setattr(storage, "record", flaky)
+    main_mod.run_sweep(storage, dry_run=True, source_name="fake")
+
+    assert storage.conn.execute("SELECT COUNT(*) FROM price_history").fetchone()[0] == 1
+    assert "[erro] Rota A" in capsys.readouterr().err
+
+
 def test_real_sweep_without_telegram_degrades(tmp_path, capsys):
     storage = Storage(tmp_path / "h.db")
     seed_route(storage)
