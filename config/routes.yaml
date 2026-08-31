@@ -10,23 +10,46 @@
 
 currency: BRL
 
+# Viagem set/2026: ida 04–11/set, volta 18–25/set (7–21 noites; a busca usa o
+# ponto médio, ~14 noites, que cai dentro da janela de volta para toda data de ida).
+# Melhor preço visto em 31/08 no comentário de cada rota.
 routes:
-  - name: "São Paulo → Recife"
+  - name: "São Paulo → Salvador"
     origin: GRU
-    dest: REC
-    depart_range: ["2026-11-05", "2026-11-20"]
-    return_after_days: [5, 9]
+    dest: SSA
+    depart_range: ["2026-09-04", "2026-09-11"]
+    return_after_days: [7, 21]
     adults: 1
-    target_price: 900
-    drop_pct: 20
+    target_price: 1300   # visto: 1237 (LATAM, direto)
+    drop_pct: 15
     nonstop: false
 
-  - name: "São Paulo → Lisboa"
+  - name: "São Paulo → Porto Seguro"
     origin: GRU
-    dest: LIS
-    depart_range: ["2027-02-01", "2027-02-15"]
-    return_after_days: [10, 21]
-    adults: 2
-    target_price: 9000
-    drop_pct: 25
+    dest: BPS
+    depart_range: ["2026-09-04", "2026-09-11"]
+    return_after_days: [7, 21]
+    adults: 1
+    target_price: 1550   # visto: 1521 (LATAM, direto)
+    drop_pct: 15
+    nonstop: false
+
+  - name: "São Paulo → Belém"
+    origin: GRU
+    dest: BEL
+    depart_range: ["2026-09-04", "2026-09-11"]
+    return_after_days: [7, 21]
+    adults: 1
+    target_price: 1700   # visto: 1654 (Azul, 1 escala)
+    drop_pct: 15
+    nonstop: false
+
+  - name: "São Paulo → Santiago"
+    origin: GRU
+    dest: SCL
+    depart_range: ["2026-09-04", "2026-09-11"]
+    return_after_days: [7, 21]
+    adults: 1
+    target_price: 1750   # visto: 1707 (LATAM, direto)
+    drop_pct: 15
     nonstop: false
