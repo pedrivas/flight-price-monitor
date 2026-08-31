@@ -128,18 +128,31 @@ under *Settings → Secrets and variables → Actions*:
 - [ADR-004: GitHub Actions as Scheduler and History Store](docs/adr/ADR-004-github-actions-scheduler.md) *(superseded by ADR-006)*
 - [ADR-005: LLM-Based Promo Classification — Deferred](docs/adr/ADR-005-llm-promo-classification-deferred.md)
 - [ADR-006: Interactive Bot via Polling in the Existing Workflow](docs/adr/ADR-006-interactive-bot-and-polling-runtime.md)
+- [ADR-007: Explore as a Separate On-Demand Workflow](docs/adr/ADR-007-explore-as-separate-dispatch-workflow.md)
 
-## One-off destination sweep
+## Explore (destination sweep)
 
-The monitor watches fixed routes. To scan many destinations from one origin for a
-round trip under a budget (e.g. "anywhere from São Paulo under R$ 1800"):
+The monitor watches fixed routes. Explore answers the other question — *given a
+departure window, a return window and a budget, which destinations from one origin
+fit?* It sweeps a curated list (~25 Brazil + South America destinations) and posts
+the ranked result (under budget + a few near-misses) to the Telegram group.
+
+It's slow (~100 fetches, 5–10 min), so it runs **only on demand**, never in the
+monitor tick — see [ADR-007](docs/adr/ADR-007-explore-as-separate-dispatch-workflow.md).
 
 ```bash
-PYTHONPATH=src python scripts/explore.py 1800   # budget is optional, default 1800
+# GitHub: Actions → explorar → Run workflow  (or:)
+gh workflow run explorar -f depart="2026-10-01..2026-10-08" \
+  -f return="2026-10-15..2026-10-22" -f max_price="1800"
+
+# local:
+PYTHONPATH=src python -m monitor.explore \
+  --depart 2026-10-01..2026-10-08 --return 2026-10-15..2026-10-22 --max 1800 \
+  [--origin GRU] [--destinations REC,SSA,BEL] [--dry-run]
 ```
 
-Edit the `DESTS` / `DEPARTS` / `RETURNS` lists at the top of the script. It is a
-throwaway helper, not wired into the pipeline.
+The curated list lives in `DEFAULT_DESTS` in `src/monitor/explore.py`; override
+per-run with `--destinations` / the `destinations` input.
 
 ## Adding a price source
 

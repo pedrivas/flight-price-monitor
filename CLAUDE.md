@@ -68,7 +68,8 @@ Dates must be in the future — Google Flights returns nothing for past dates.
 
 - **Module structure:** `monitor.{config,models,storage,rules,notifier,telegram,bot,main}`
   plus `monitor.sources.*` for collectors. `telegram` = thin Bot API client;
-  `bot` = command parsing/handlers (`handle_message` is pure, unit-tested).
+  `bot` = command parsing/handlers (`handle_message` is pure, unit-tested);
+  `explore` = on-demand destination sweep, its own `explorar` workflow (ADR-007).
 - **Pluggable sources:** a new price source implements `PriceSource.search()` in
   `src/monitor/sources/`, is registered in `sources/__init__.py`, and changes
   nothing downstream. See ADR-002.
@@ -107,3 +108,4 @@ Dates must be in the future — Google Flights returns nothing for past dates.
 | 9 | Where AI fits (and where it doesn't) | ADR-005 — LLM-based promo classification evaluated and deferred |
 | 10 | Test coverage of core logic | `tests/` — baseline/dedupe, alert rules, config, formatting, pipeline, route store, bot commands; CI on every push |
 | 11 | Evolving under a new requirement | ADR-006 — interactive bot added by re-shaping the existing runtime, not rebuilding it; command handler is transport-agnostic |
+| 12 | Where expensive work belongs | ADR-007 — the multi-minute explore sweep runs as its own on-demand workflow, isolated from the tick and the bot |
