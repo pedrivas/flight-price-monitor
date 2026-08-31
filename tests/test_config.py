@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import date
 
-from monitor.config import load_routes
+from monitor.config import load_routes_from_yaml
 
 SAMPLE = """
 currency: BRL
@@ -30,7 +30,7 @@ def _write(tmp_path, text):
 
 
 def test_parses_routes(tmp_path):
-    routes = load_routes(_write(tmp_path, SAMPLE))
+    routes = load_routes_from_yaml(_write(tmp_path, SAMPLE))
     assert len(routes) == 2
 
     rt, ow = routes
@@ -50,6 +50,6 @@ def test_warns_when_route_has_no_alert_criteria(tmp_path, capsys):
     dest: GIG
     depart_range: ["2027-03-01", "2027-03-10"]
 """
-    load_routes(_write(tmp_path, text))
+    load_routes_from_yaml(_write(tmp_path, text))
     err = capsys.readouterr().err
     assert "Sem critério" in err and "alerta" in err
