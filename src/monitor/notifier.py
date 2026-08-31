@@ -1,17 +1,20 @@
 from __future__ import annotations
 
 import html
-import os
 from urllib.parse import urlencode
-
-import requests
 
 from .models import Offer, RouteQuery
 from .rules import AlertDecision
+from .telegram import TelegramClient
 
 
-def _esc(value: object) -> str:
+def esc(value: object) -> str:
+    """Escapa texto para o parse_mode HTML do Telegram."""
     return html.escape(str(value), quote=False)
+
+
+# alias interno mantido por compatibilidade
+_esc = esc
 
 
 def google_flights_link(route: RouteQuery, offer: Offer) -> str:
@@ -30,12 +33,12 @@ def format_alert(route: RouteQuery, offer: Offer, decision: AlertDecision) -> st
     )
     return "\n".join(
         [
-            f"✈️ <b>Promoção: {_esc(route.name)}</b>",
+            f"✈️ <b>Promoção: {esc(route.name)}</b>",
             "",
-            f"💰 <b>{_esc(offer.currency)} {offer.price:,.0f}</b>  "
-            f"({_esc(', '.join(decision.reasons))})",
+            f"💰 <b>{esc(offer.currency)} {offer.price:,.0f}</b>  "
+            f"({esc(', '.join(decision.reasons))})",
             trip,
-            f"🛫 {_esc(offer.carrier)} · {stops} · {route.adults} pax",
+            f"🛫 {esc(offer.carrier)} · {stops} · {route.adults} pax",
             "",
             f"🔗 {google_flights_link(route, offer)}",
         ]
@@ -43,19 +46,10 @@ def format_alert(route: RouteQuery, offer: Offer, decision: AlertDecision) -> st
 
 
 class TelegramNotifier:
-    def __init__(self) -> None:
-        self.token = os.environ["TELEGRAM_BOT_TOKEN"]
-        self.chat_id = os.environ["TELEGRAM_CHAT_ID"]
+    """Wrapper fino sobre TelegramClient para o caminho de alerta."""
+
+    def __init__(self, client: TelegramClient | None = None) -> None:
+        self._client = client or TelegramClient()
 
     def send(self, text: str) -> None:
-        resp = requests.post(
-            f"https://api.telegram.org/bot{self.token}/sendMessage",
-            json={
-                "chat_id": self.chat_id,
-                "text": text,
-                "parse_mode": "HTML",
-                "disable_web_page_preview": False,
-            },
-            timeout=20,
-        )
-        resp.raise_for_status()
+        self._client.send_message(text)
