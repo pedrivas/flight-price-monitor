@@ -41,7 +41,11 @@ Amadeus Self-Service was decommissioned on 2026-07-17 — see
    keyed by the route row id (so editing a route keeps its history).
 3. It alerts when `price <= target_price` **or** `price <= median_30d * (1 - drop_pct%)`.
 4. Dedupe: the same promo is not re-sent (fares within 2% over the last 7 days).
-5. A Telegram message goes out with a Google Flights link.
+5. A Telegram message goes out: price, dates, carrier, the outbound itinerary
+   (connection airports + layover time for each stop, total gate-to-gate
+   duration), and a Google Flights link. Connection/duration detail is only
+   available for the outbound leg — `fast-flights`' round-trip response doesn't
+   include the return leg's segments — the message notes that when it applies.
 
 ## Bot commands
 
@@ -165,7 +169,9 @@ Implement `PriceSource.search()` in `src/monitor/sources/`, register it in
   `fast-flights` has paid integrations (BrightData / SearchApi) as a fallback.
 - ~4 dates sampled per window to avoid hammering the source; tune in
   `monitor/dates.py` (`sample_dates`). Round trips test one trip length (window midpoint).
-- Round-trip stop count reflects the outbound leg only.
+- Round-trip stop count, connection airports and duration all reflect the
+  outbound leg only — `fast-flights` doesn't expose the return leg's segments
+  in the round-trip response.
 - No direct booking link; alerts link to a Google Flights search.
 - For WhatsApp instead of Telegram: swap `notifier.py` for a WhatsApp Cloud API
   client. Nothing else changes.

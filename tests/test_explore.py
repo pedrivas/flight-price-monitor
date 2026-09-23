@@ -12,7 +12,7 @@ from monitor.explore import (
     format_results,
     run_explore,
 )
-from monitor.models import Offer
+from monitor.models import FlightLeg, Offer
 from monitor.sources.fake import FakeSource
 
 
@@ -97,6 +97,17 @@ def test_format_results_lists_and_escapes():
     assert "Explore GRU" in out
     assert "Recife &amp; cia (REC)" in out
     assert "quase lá" in out and "Rio (GIG)" in out
+
+
+def test_format_results_shows_itinerary_when_available():
+    leg = FlightLeg(airports=["GRU", "SCL"], seg_minutes=[210], layover_minutes=[], total_minutes=210)
+    hit = ExploreHit("SCL", "Santiago", Offer(
+        route_key="x", price=700, currency="BRL",
+        depart_date=date(2026, 10, 4), return_date=date(2026, 10, 18),
+        carrier="LATAM", stops=0, outbound=leg,
+    ))
+    out = format_results([hit], [], "GRU", 1800, "BRL")
+    assert "GRU → SCL · 3h30 (direto)" in out
 
 
 def test_format_results_empty():
