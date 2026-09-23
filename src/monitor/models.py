@@ -35,6 +35,25 @@ class RouteQuery:
 
 
 @dataclass
+class FlightLeg:
+    """Itinerário detalhado de um trecho (voo + conexões).
+
+    `airports` tem N+1 aeroportos para N segmentos: `["GRU","LHR","IST"]` para
+    2 segmentos. `layover_minutes` tem N-1 valores (tempo de conexão entre
+    segmentos consecutivos). `total_minutes` é porta-a-porta (inclui conexão).
+    """
+
+    airports: list[str]
+    seg_minutes: list[int]
+    layover_minutes: list[int]
+    total_minutes: int
+
+    @property
+    def stops(self) -> int:
+        return max(len(self.airports) - 2, 0)
+
+
+@dataclass
 class Offer:
     """Uma oferta de passagem concreta retornada por uma fonte."""
 
@@ -47,3 +66,4 @@ class Offer:
     stops: int
     deep_link: str | None = None
     raw: dict = field(default_factory=dict)
+    outbound: FlightLeg | None = None  # detalhe do trecho de ida, quando a fonte fornece

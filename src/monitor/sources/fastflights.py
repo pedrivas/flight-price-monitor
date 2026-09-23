@@ -2,14 +2,40 @@ from __future__ import annotations
 
 import sys
 import time
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 
 from fast_flights import FlightQuery, Passengers, create_query, get_flights
 from fast_flights.exceptions import FlightsNotFound
 
 from ..dates import sample_dates
-from ..models import Offer, RouteQuery
+from ..models import FlightLeg, Offer, RouteQuery
 from .base import PriceSource
+
+
+def _to_datetime(simple_dt) -> datetime:
+    y, m, d = simple_dt.date
+    h, mi = simple_dt.time
+    return datetime(y, m, d, h, mi)
+
+
+def _build_leg(segments) -> FlightLeg | None:
+    """Monta o FlightLeg a partir dos segmentos de UM trecho (ida ou volta)
+    devolvidos pela fast-flights. `segments` é `Flights.flights` (SingleFlight)."""
+    if not segments:
+        return None
+    try:
+        airports = [segments[0].from_airport.code] + [s.to_airport.code for s in segments]
+        seg_minutes = [int(s.duration) for s in segments]
+        layover_minutes = [
+            int((_to_datetime(segments[i + 1].departure) - _to_datetime(segments[i].arrival)).total_seconds() // 60)
+            for i in range(len(segments) - 1)
+        ]
+        total_minutes = int(
+            (_to_datetime(segments[-1].arrival) - _to_datetime(segments[0].departure)).total_seconds() // 60
+        )
+    except (AttributeError, TypeError, ValueError):
+        return None  # dados de horário incompletos — segue sem o detalhe, não é fatal
+    return FlightLeg(airports=airports, seg_minutes=seg_minutes, layover_minutes=layover_minutes, total_minutes=total_minutes)
 
 
 class FastFlightsSource(PriceSource):
@@ -80,6 +106,7 @@ class FastFlightsSource(PriceSource):
                         return_date=ret,
                         carrier=", ".join(fl.airlines) if fl.airlines else str(fl.type),
                         stops=max(len(fl.flights) - 1, 0),  # escalas do trecho de ida
+                        outbound=_build_leg(fl.flights),
                     )
                 )
 

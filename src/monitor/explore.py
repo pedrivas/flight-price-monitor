@@ -18,7 +18,7 @@ from datetime import date
 from dotenv import load_dotenv
 
 from .models import Offer, RouteQuery
-from .notifier import esc
+from .notifier import esc, format_leg
 from .sources import get_source
 from .sources.base import PriceSource
 from .telegram import TelegramClient
@@ -118,11 +118,12 @@ def run_explore(
 
 def _hit_line(h: ExploreHit, currency: str) -> str:
     o = h.offer
-    stops = "direto" if o.stops == 0 else f"{o.stops} esc"
     volta = f" · volta {o.return_date}" if o.return_date else ""
+    itinerary = esc(format_leg(o.outbound)) if o.outbound else ("direto" if o.stops == 0 else f"{o.stops} esc")
     return (
         f"<b>{currency} {o.price:,.0f}</b> — {esc(h.name)} ({h.code})\n"
-        f"   ida {o.depart_date}{volta} · {esc(o.carrier)} · {stops}"
+        f"   ida {o.depart_date}{volta} · {esc(o.carrier)}\n"
+        f"   {itinerary}"
     )
 
 
