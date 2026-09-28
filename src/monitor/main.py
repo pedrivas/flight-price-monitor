@@ -124,7 +124,16 @@ def main() -> None:
     p.add_argument("--no-bot", action="store_true", help="não processa comandos do Telegram")
     p.add_argument("--bot-only", action="store_true", help="só processa comandos, sem varredura")
     p.add_argument("--command", help="executa um comando do bot agora (ex: '/excluir 3') e sai")
+    p.add_argument("--backup-now", action="store_true", help="força o backup pro OCI Object Storage e sai")
     args = p.parse_args()
+
+    if args.backup_now:
+        load_dotenv()
+        from . import backup
+
+        backup.run_backup(Storage())
+        return
+
     tick(
         dry_run=args.dry_run,
         source_name=args.source,
