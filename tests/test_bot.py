@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from conftest import seed_route
 
-from monitor.bot import handle_message, poll_and_handle
+from monitor.bot import Job, dispatch_message, handle_message, handle_update, poll_and_handle
 
 
 # --- handle_message: comandos individuais ---------------------------------
@@ -133,3 +133,81 @@ def test_poll_advances_offset_across_calls(storage, fake_telegram, monkeypatch):
     # a 2ª chamada só processa o update 2 → 2 respostas no total
     assert len(fake_telegram.sent) == 2
     assert storage.kv_get("telegram_offset") == "2"
+
+
+# --- dispatch_message / Job (webhook) --------------------------------------
+def test_dispatch_explore_returns_job(storage):
+    reply, job = dispatch_message(
+        "/explorar GRU 2026-10-01..2026-10-08 2026-10-15..2026-10-22 1800", storage
+    )
+    assert "rodando" in reply.lower()
+    assert isinstance(job, Job) and job.kind == "explore"
+    assert job.payload["origin"] == "GRU"
+    assert job.payload["max_price"] == 1800
+
+
+def test_dispatch_explore_with_destinations(storage):
+    _reply, job = dispatch_message(
+        "/explorar GRU 2026-10-01..2026-10-08 2026-10-15..2026-10-22 1800 REC,SSA", storage
+    )
+    assert job.payload["destinations"] == "REC,SSA"
+
+
+def test_dispatch_explore_rejects_malformed_range(storage):
+    reply, job = dispatch_message(
+        "/explorar GRU 2026-10-01 2026-10-15..2026-10-22 1800", storage
+    )
+    assert job is None
+    assert "AAAA-MM-DD" in reply
+
+
+def test_dispatch_explore_rejects_missing_args(storage):
+    reply, job = dispatch_message("/explorar GRU", storage)
+    assert job is None and "uso:" in reply
+
+
+def test_dispatch_varrer_returns_job(storage):
+    reply, job = dispatch_message("/varrer", storage)
+    assert isinstance(job, Job) and job.kind == "sweep"
+    assert "varredura" in reply.lower()
+
+
+def test_handle_message_drops_job_stays_pure(storage):
+    # handle_message continua devolvendo só o texto — o Job não vaza pra quem
+    # só quer a resposta síncrona (compat com os testes/usos antigos).
+    reply = handle_message("/varrer", storage)
+    assert "varredura" in reply.lower()
+
+
+def test_handle_update_runs_job_inline_when_no_on_job(storage, fake_telegram, monkeypatch):
+    calls = []
+    monkeypatch.setattr("monitor.bot.run_job", lambda job, s: calls.append(job.kind))
+    update = {"message": {"text": "/varrer", "chat": {"id": 1}}}
+
+    handled = handle_update(update, storage, fake_telegram, allowed=set())
+
+    assert handled is True
+    assert calls == ["sweep"]
+    assert len(fake_telegram.sent) == 1
+
+
+def test_handle_update_forwards_job_via_on_job(storage, fake_telegram):
+    received = []
+    update = {"message": {"text": "/varrer", "chat": {"id": 1}}}
+
+    handle_update(update, storage, fake_telegram, allowed=set(), on_job=received.append)
+
+    assert len(received) == 1 and received[0].kind == "sweep"
+
+
+def test_handle_update_respects_allowlist(storage, fake_telegram):
+    update = {"message": {"text": "/monitorias", "chat": {"id": 999}}}
+
+    handled = handle_update(update, storage, fake_telegram, allowed={1})
+
+    assert handled is False
+    assert fake_telegram.sent == []
+
+
+def test_handle_update_ignores_non_text_update(storage, fake_telegram):
+    assert handle_update({"message": {"chat": {"id": 1}}}, storage, fake_telegram, allowed=set()) is False
