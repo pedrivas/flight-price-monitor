@@ -69,6 +69,12 @@ class Storage:
         path.parent.mkdir(parents=True, exist_ok=True)
         self.conn = sqlite3.connect(path)
         self.conn.row_factory = sqlite3.Row
+        # WAL + busy_timeout: no server.py, o worker rápido (comandos) e o lento
+        # (varredura/explore) abrem cada um sua própria conexão contra o mesmo
+        # arquivo — WAL deixa leitores/escritor conviverem, busy_timeout evita
+        # "database is locked" imediato numa colisão passageira.
+        self.conn.execute("PRAGMA journal_mode=WAL")
+        self.conn.execute("PRAGMA busy_timeout=5000")
         self.conn.executescript(SCHEMA)
         self.conn.commit()
 
