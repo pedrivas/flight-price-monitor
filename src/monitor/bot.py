@@ -7,6 +7,7 @@ import traceback
 from dataclasses import dataclass, field
 from datetime import date
 
+from .airports import city_country
 from .config import has_no_alert_criteria
 from .models import RouteQuery
 from .notifier import esc
@@ -20,6 +21,7 @@ HELP = (
     "    ex: <code>/criar GRU BEL 2026-09-04..2026-09-11 7-21 1700 15</code>\n"
     "    só-ida: use <code>-</code> em NOITES\n"
     "/editar ID CAMPO VALOR — campos: nome alvo drop pax nonstop ida_de ida_ate noites\n"
+    "    só ID (sem campo/valor) mostra o detalhe daquela rota\n"
     "    ex: <code>/editar 3 alvo 1600</code>\n"
     "/excluir ID — remove (confirme com <code>/excluir ID sim</code>)\n"
     "/pausar ID   /ativar ID\n"
@@ -109,11 +111,38 @@ def _route_line(r: RouteQuery, storage: Storage) -> str:
         crit.append(f"queda {r.drop_pct:.0f}%")
     last = storage.last_price(r.key)
     last_txt = f" · último: {r.currency} {last:.0f}" if last is not None else ""
+    city, country = city_country(r.dest)
     return (
-        f"<b>#{r.id}</b> · {esc(r.name)}\n"
+        f"<b>#{r.id}</b> · {esc(r.name)} ({esc(city)}, {esc(country)})\n"
         f"   {r.origin}→{r.dest} · {r.depart_range[0]}→{r.depart_range[1]} · {nights} · {r.adults} pax\n"
         f"   {esc(' · '.join(crit) or 'sem critério de alerta')}{last_txt}"
     )
+
+
+def _routes_table(routes: list[RouteQuery], storage: Storage) -> str:
+    """Tabela alinhada em fonte monoespaçada — Telegram não tem <table> no
+    HTML dele, então um bloco <pre> com colunas de largura fixa é o que
+    renderiza como tabela de verdade no app."""
+    headers = ("#", "Destino", "País", "Alvo", "Último")
+    right_aligned = {0, 3, 4}  # #, Alvo, Último — colunas numéricas
+
+    rows = []
+    for r in routes:
+        city, country = city_country(r.dest)
+        alvo = f"{r.target_price:.0f}" if r.target_price is not None else "-"
+        last = storage.last_price(r.key)
+        ultimo = f"{last:.0f}" if last is not None else "-"
+        rows.append((f"#{r.id}", city, country, alvo, ultimo))
+
+    widths = [max(len(headers[i]), *(len(row[i]) for row in rows)) for i in range(len(headers))]
+
+    def fmt(cells: tuple[str, ...]) -> str:
+        return "  ".join(
+            c.rjust(w) if i in right_aligned else c.ljust(w) for i, (c, w) in enumerate(zip(cells, widths))
+        )
+
+    lines = [fmt(headers), fmt(tuple("-" * w for w in widths)), *(fmt(r) for r in rows)]
+    return "<pre>" + esc("\n".join(lines)) + "</pre>"
 
 
 # --- comandos -------------------------------------------------------------
@@ -125,7 +154,10 @@ def cmd_list(args, storage) -> str:
     routes = storage.list_routes(active_only=True)
     if not routes:
         return "Nenhuma monitoria ativa. Crie uma com /criar."
-    return "📋 <b>Monitorias ativas</b>\n\n" + "\n\n".join(_route_line(r, storage) for r in routes)
+    return (
+        f"📋 <b>Monitorias ativas</b>\n\n{_routes_table(routes, storage)}\n"
+        f"<i>valores em R$ · detalhe de uma rota: /editar ID</i>"
+    )
 
 
 def cmd_create(args, storage) -> str:
@@ -183,6 +215,14 @@ _EDIT_FIELDS = {
 
 
 def cmd_edit(args, storage) -> str:
+    if not args:
+        raise CommandError("uso: /editar ID [CAMPO VALOR]  (só ID mostra o detalhe da rota)")
+    if len(args) == 1:
+        route_id = _int_id(args[0])
+        route = storage.get_route(route_id)
+        if route is None:
+            raise CommandError(f"monitoria #{route_id} não existe")
+        return _route_line(route, storage)
     if len(args) < 3:
         raise CommandError("uso: /editar ID CAMPO VALOR")
     route_id = _int_id(args[0])

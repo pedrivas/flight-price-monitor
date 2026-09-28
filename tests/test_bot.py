@@ -18,7 +18,14 @@ def test_list_empty(storage):
 def test_list_shows_routes(storage):
     seed_route(storage, name="GRU→BEL", dest="BEL", target_price=1700.0)
     out = handle_message("/monitorias", storage)
-    assert "GRU→BEL" in out and "#1" in out and "1700" in out
+    assert "Belém" in out and "Brasil" in out and "#1" in out and "1700" in out
+
+
+def test_list_table_has_header_and_alignment(storage):
+    seed_route(storage, dest="CAI", target_price=5800.0)
+    out = handle_message("/monitorias", storage)
+    assert "<pre>" in out and "</pre>" in out
+    assert "Destino" in out and "País" in out and "Egito" in out
 
 
 def test_criar_roundtrip(storage):
