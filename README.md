@@ -8,19 +8,25 @@ for the interview-topic map and [`docs/adr/`](docs/adr/) for the decisions.
 
 ## Architecture
 
-One GitHub Actions workflow runs a "tick" every ~20 minutes ([ADR-006](docs/adr/ADR-006-interactive-bot-and-polling-runtime.md)):
+`python -m monitor.server` runs always-on in a container on a shared Oracle
+Cloud VM, behind a Traefik edge, reached by a Telegram **webhook**
+([ADR-008](docs/adr/ADR-008-vm-webhook-runtime.md), supersedes ADR-006):
 
 ```
-tick
- ├─ bot        — Telegram getUpdates → /monitorias /criar /editar /excluir
- └─ if ≥6h since last sweep:
-      Collector (PriceSource) → Storage (SQLite) → Rules → Notifier (Telegram)
+Telegram ──HTTPS──▶ Traefik edge ──▶ POST /webhook/flight-tg ──▶ 200 na hora, enfileira
+                                                                        │
+                                              ┌─────────────────────────┴─────────────────────────┐
+                                        fila rápida                                          fila lenta ◀ scheduler (1/min)
+                                              │                                                     │
+                                   worker rápido: handle_update                    worker lento: run_sweep / run_explore / backup
+                                   (comandos comuns respondem na hora)             Collector (PriceSource) → Storage → Rules → Notifier
 ```
 
 The collector is the only pluggable stage; downstream works on the normalized
 `Offer` model ([ADR-002](docs/adr/ADR-002-pluggable-price-source-interface.md)).
-All state — price history, the route list, and the bot's read offset — lives in
-`data/history.db`, which the workflow commits back after every tick.
+All state — price history, the route list, the Telegram offset — lives in
+`./data/history.db` on the VM (SQLite WAL; each worker holds its own connection).
+It is no longer committed to git.
 
 ## Price sources
 
@@ -50,7 +56,7 @@ Amadeus Self-Service was decommissioned on 2026-07-17 — see
 ## Bot commands
 
 Send these to the bot (or the group) from a chat listed in `TELEGRAM_ALLOWED_CHAT_IDS`
-(defaults to `TELEGRAM_CHAT_ID`):
+(defaults to `TELEGRAM_CHAT_ID`). Answered in under a second by the webhook:
 
 | Command | |
 |---|---|
@@ -59,20 +65,20 @@ Send these to the bot (or the group) from a chat listed in `TELEGRAM_ALLOWED_CHA
 | `/editar 3 alvo 1600` | edit a field: `nome alvo drop pax nonstop ida_de ida_ate noites` |
 | `/excluir 3` | remove (confirm with `/excluir 3 sim`) |
 | `/pausar 3` · `/ativar 3` | toggle without deleting |
+| `/explorar GRU 2026-10-01..2026-10-08 2026-10-15..2026-10-22 1800 [REC,SSA]` | which destinations fit a budget; queued on the slow worker, result arrives as a separate message a few minutes later |
+| `/varrer` | force a price sweep now, outside the 6h gate |
 
-Commands are processed on the next tick (typically 0–20 min; GitHub cron is best-effort — see ADR-006).
+For local dev without the webhook (`--bot-only`, polling), the same commands
+work but `/explorar`/`/varrer` run inline and block until done — there's no
+queue to hand them to outside the server process.
 
-**Faster path**, no Telegram round-trip: run a single command on demand via
-`workflow_dispatch` (~40 s). Use the command **without** the leading slash — it's
-optional here and a bare `/word` gets mangled by Git Bash on Windows:
+**One-off command without Telegram:**
 
 ```bash
-gh workflow run monitor-passagens -f command="excluir 3"
+PYTHONPATH=src python -m monitor.main --command "excluir 3"
 ```
 
-or the GitHub UI/mobile app: *Actions → monitor-passagens → Run workflow*, fill the
-`command` field (`monitorias`, `excluir 3`, `criar GRU FOR ...`). The reply is
-printed in the run log and echoed to the group.
+prints the reply and, unless `--dry-run`, echoes it to the group too.
 
 ## Running locally
 
@@ -83,13 +89,24 @@ cp .env.example .env        # fill in the Telegram values
 
 export PYTHONPATH=src
 python -m monitor.main --sweep-now --dry-run --source fake --no-bot  # smoke test, no network
-python -m monitor.main --bot-only                # handle Telegram commands only
+python -m monitor.main --bot-only                # handle Telegram commands only (polling)
 python -m monitor.main --sweep-now --dry-run     # real fares, nothing sent
-python -m monitor.main                           # a real tick
+python -m monitor.main                           # one tick: bot poll + sweep if due
+python -m monitor.main --backup-now              # force the OCI backup and exit
+
+python -m monitor.server                         # the real always-on runtime (needs TELEGRAM_WEBHOOK_SECRET)
 ```
 
 **Telegram:** create a bot with [@BotFather](https://t.me/BotFather), send it
 `/start`, then run `python scripts/get_chat_id.py` to get `TELEGRAM_CHAT_ID`.
+
+**Docker:**
+
+```bash
+docker compose config -q                                                     # validate syntax
+docker compose run --rm app python -m monitor.main --sweep-now --dry-run --no-bot  # sweep from inside the image, no server
+docker compose up -d                                                         # the real thing
+```
 
 ## Tests
 
@@ -99,7 +116,10 @@ python -m pytest -q
 ```
 
 Covers date sampling, the SQLite baseline/dedupe logic, the route store, alert
-rules, config parsing, Telegram formatting, bot command handling, and the tick
+rules, config parsing, Telegram formatting, bot command handling (including
+`/explorar`/`/varrer` job dispatch), the webhook HTTP handler and its two
+workers/scheduler (`test_server.py`, against a real ephemeral-port server),
+the backup gate/upload (`test_backup.py`, `requests` mocked), and the tick
 pipeline with the `fake` source. CI runs them on every push and PR
 (`.github/workflows/ci.yml`).
 
@@ -113,16 +133,28 @@ First run only: `config/routes.yaml` seeds the `routes` table. Per-route fields:
 After the first run, use the bot commands above — the DB is the source of truth
 and the YAML is ignored.
 
-## Scheduling
+## Deploying
 
-**GitHub Actions** (free on public repos): `.github/workflows/monitor.yml` runs
-the tick roughly every 20 min and commits `data/history.db` back — see
-[ADR-006](docs/adr/ADR-006-interactive-bot-and-polling-runtime.md). Configure
-under *Settings → Secrets and variables → Actions*:
+Always-on on a shared Oracle Cloud Always Free VM behind a Traefik edge —
+`docker-compose.yml` at the repo root, following the platform's contract in
+the separate `vm-infra-oracle` repo (`docs/onboarding-a-project.md`). See
+[ADR-008](docs/adr/ADR-008-vm-webhook-runtime.md) for the full design and the
+cutover runbook.
 
-- Secrets: `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` (and `TRAVELPAYOUTS_*` if used)
-- Variables (optional): `PRICE_SOURCE` (default `fastflights`),
-  `TELEGRAM_ALLOWED_CHAT_IDS` (default `TELEGRAM_CHAT_ID`)
+`.env` needs (see `.env.example`): `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`,
+`TELEGRAM_WEBHOOK_SECRET`, `WEBHOOK_URL` (used once by `scripts/set_webhook.py`),
+and optionally `TELEGRAM_ALLOWED_CHAT_IDS`, `PRICE_SOURCE`, `OCI_BACKUP_PAR_URL`.
+
+```bash
+# on the VM, after `docker compose up -d` and a successful /healthz check:
+python scripts/set_webhook.py set     # point Telegram at the webhook
+python scripts/set_webhook.py info    # inspect (pending_update_count, last_error_message)
+python scripts/set_webhook.py delete  # rollback to polling
+```
+
+*(Legacy: GitHub Actions ran this as a `monitor-passagens` cron tick before
+ADR-008 — see that ADR and ADR-006 for why it moved. `ci.yml` still runs the
+test suite on every push/PR.)*
 
 ## Architecture Decision Records
 
@@ -132,7 +164,8 @@ under *Settings → Secrets and variables → Actions*:
 - [ADR-004: GitHub Actions as Scheduler and History Store](docs/adr/ADR-004-github-actions-scheduler.md) *(superseded by ADR-006)*
 - [ADR-005: LLM-Based Promo Classification — Deferred](docs/adr/ADR-005-llm-promo-classification-deferred.md)
 - [ADR-006: Interactive Bot via Polling in the Existing Workflow](docs/adr/ADR-006-interactive-bot-and-polling-runtime.md)
-- [ADR-007: Explore as a Separate On-Demand Workflow](docs/adr/ADR-007-explore-as-separate-dispatch-workflow.md)
+- [ADR-007: Explore as a Separate On-Demand Workflow](docs/adr/ADR-007-explore-as-separate-dispatch-workflow.md) *(revisited by ADR-008 — `/explorar` is now a queued chat command)*
+- [ADR-008: Always-On Runtime on the Oracle VM, via Webhook](docs/adr/ADR-008-vm-webhook-runtime.md)
 
 ## Explore (destination sweep)
 
@@ -141,22 +174,18 @@ departure window, a return window and a budget, which destinations from one orig
 fit?* It sweeps a curated list (~25 Brazil + South America destinations) and posts
 the ranked result (under budget + a few near-misses) to the Telegram group.
 
-It's slow (~100 fetches, 5–10 min), so it runs **only on demand**, never in the
-monitor tick — see [ADR-007](docs/adr/ADR-007-explore-as-separate-dispatch-workflow.md).
+It's slow (~100 fetches, 5–10 min). On the webhook runtime it's the `/explorar`
+chat command (queued on the slow worker, doesn't block anything — see
+[ADR-008](docs/adr/ADR-008-vm-webhook-runtime.md)); it can also be run directly:
 
 ```bash
-# GitHub: Actions → explorar → Run workflow  (or:)
-gh workflow run explorar -f depart="2026-10-01..2026-10-08" \
-  -f return="2026-10-15..2026-10-22" -f max_price="1800"
-
-# local:
 PYTHONPATH=src python -m monitor.explore \
   --depart 2026-10-01..2026-10-08 --return 2026-10-15..2026-10-22 --max 1800 \
   [--origin GRU] [--destinations REC,SSA,BEL] [--dry-run]
 ```
 
 The curated list lives in `DEFAULT_DESTS` in `src/monitor/explore.py`; override
-per-run with `--destinations` / the `destinations` input.
+per-run with `--destinations` / the command's last argument.
 
 ## Adding a price source
 
@@ -175,6 +204,10 @@ Implement `PriceSource.search()` in `src/monitor/sources/`, register it in
 - No direct booking link; alerts link to a Google Flights search.
 - For WhatsApp instead of Telegram: swap `notifier.py` for a WhatsApp Cloud API
   client. Nothing else changes.
+- The webhook depends on `vm-infra-oracle`'s Traefik edge being up; if it's
+  down, inbound commands stop but the sweep/backup scheduler keeps running.
+- `fast-flights`' `primp` (Rust) dependency needs an aarch64 wheel on the VM's
+  A1 shape — validated in the cutover runbook, not assumed.
 
 ## License
 

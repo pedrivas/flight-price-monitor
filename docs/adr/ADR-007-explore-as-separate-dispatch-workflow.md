@@ -1,6 +1,7 @@
 # ADR-007: Explore as a Separate On-Demand Workflow
 
-**Status:** Accepted
+**Status:** Accepted for the GitHub Actions runtime. Revisited by
+[ADR-008](ADR-008-vm-webhook-runtime.md) — see the note at the end.
 **Date:** 2026-09-01
 
 ## Context
@@ -54,3 +55,16 @@ tick for the whole sweep.
   rejected as over-engineering for an occasional manual query.
 - **Fold into the `monitor-passagens` `command` input** — rejected. Mixes a heavy,
   unrelated operation into the monitor workflow.
+
+## 2026-09-28 note
+
+The reasoning above was correct for its runtime: a GitHub Actions batch job has
+no worker to hand a long task to, so an async queue *was* over-engineering.
+ADR-008 replaces that runtime with a long-running process that already needs a
+queue and a background worker for the price sweep. Given that infrastructure
+now exists for free, `/explorar` becomes a real chat command (`bot.cmd_explore`
+returns a `Job` the slow worker executes) instead of a separate
+`workflow_dispatch`. The original decision here was right for the constraints
+it was made under — it just stopped being the cheapest option once those
+constraints changed. This ADR's status updates to reflect that; the reasoning
+stays as a record of why the workflow approach was correct at the time.
