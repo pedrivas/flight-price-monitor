@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import argparse
 import os
 import sys
 import traceback
+from dataclasses import dataclass, field
 from datetime import date
 
 from .config import has_no_alert_criteria
@@ -20,8 +22,22 @@ HELP = (
     "/editar ID CAMPO VALOR — campos: nome alvo drop pax nonstop ida_de ida_ate noites\n"
     "    ex: <code>/editar 3 alvo 1600</code>\n"
     "/excluir ID — remove (confirme com <code>/excluir ID sim</code>)\n"
-    "/pausar ID   /ativar ID"
+    "/pausar ID   /ativar ID\n"
+    "/explorar ORIG IDA_DE..IDA_ATE VOLTA_DE..VOLTA_ATE TETO [DEST1,DEST2,...]\n"
+    "    ex: <code>/explorar GRU 2026-10-01..2026-10-08 2026-10-15..2026-10-22 1800</code>\n"
+    "    demora alguns minutos; o resultado chega em mensagem separada\n"
+    "/varrer — força a varredura de preços agora, fora do gate de 6h"
 )
+
+
+@dataclass
+class Job:
+    """Trabalho demorado que um comando pode gerar. `dispatch_message` só
+    monta o Job — quem executa é `run_job`, chamado pelo worker "lento" do
+    server.py (ou direto, de forma síncrona, no modo polling local)."""
+
+    kind: str  # "sweep" | "explore"
+    payload: dict = field(default_factory=dict)
 
 
 class CommandError(Exception):
@@ -218,6 +234,58 @@ def cmd_activate(args, storage) -> str:
     return _toggle(args, storage, active=True, verb="reativada")
 
 
+def cmd_explore(args, storage) -> tuple[str, Job]:
+    if len(args) < 4:
+        raise CommandError(
+            "uso: /explorar ORIG IDA_DE..IDA_ATE VOLTA_DE..VOLTA_ATE TETO [DEST1,DEST2,...]"
+        )
+    from . import explore as explore_module  # import tardio: evita ciclo no carregamento do módulo
+
+    origin = _airport(args[0])
+    try:
+        depart_range = explore_module._parse_range(args[1])
+        return_range = explore_module._parse_range(args[2])
+    except argparse.ArgumentTypeError as exc:
+        raise CommandError(str(exc))
+    max_price = _price(args[3])
+    if max_price is None:
+        raise CommandError("TETO precisa ser um valor positivo")
+    payload = dict(
+        origin=origin, depart_range=depart_range, return_range=return_range,
+        max_price=max_price, destinations=args[4] if len(args) > 4 else "",
+    )
+    return "🔎 Rodando a busca (alguns minutos)… mando o resultado aqui.", Job(kind="explore", payload=payload)
+
+
+def cmd_sweep_now(args, storage) -> tuple[str, Job]:
+    return "🔄 Varredura forçada, iniciando agora…", Job(kind="sweep")
+
+
+def run_job(job: Job, storage: Storage) -> None:
+    """Executa um Job de verdade. Chamado pelo worker lento do server.py, ou
+    de forma síncrona no modo polling local (sem fila pra enfileirar nele)."""
+    if job.kind == "sweep":
+        from . import main as main_mod  # import tardio: main.py importa bot.py no nível do módulo
+
+        main_mod.run_sweep(storage, dry_run=False, source_name=os.environ.get("PRICE_SOURCE", "fastflights"))
+        storage.mark_sweep_done()
+    elif job.kind == "explore":
+        from . import explore as explore_module
+
+        p = job.payload
+        dests = None
+        if p.get("destinations"):
+            codes = [c.strip().upper() for c in p["destinations"].replace(";", ",").split(",") if c.strip()]
+            dests = {c: explore_module.DEFAULT_DESTS.get(c, c) for c in codes}
+        under, near = explore_module.run_explore(
+            p["origin"], p["depart_range"], p["return_range"], p["max_price"], dests=dests,
+        )
+        text = explore_module.format_results(under, near, p["origin"], p["max_price"], "BRL")
+        TelegramClient().send_message(text)
+    else:
+        print(f"[erro] job desconhecido: {job.kind}", file=sys.stderr)
+
+
 def _toggle(args, storage, active: bool, verb: str) -> str:
     if not args:
         raise CommandError("informe o ID")
@@ -247,19 +315,35 @@ COMMANDS = {
     "pausar": cmd_pause, "ativar": cmd_activate,
 }
 
+# Comandos que disparam trabalho demorado — devolvem (resposta imediata, Job).
+JOB_COMMANDS = {
+    "explorar": cmd_explore,
+    "varrer": cmd_sweep_now,
+}
 
-def handle_message(text: str, storage: Storage) -> str:
+
+def dispatch_message(text: str, storage: Storage) -> tuple[str, Job | None]:
+    """Como handle_message, mas também devolve o Job (se houver) pro chamador
+    executar. `handle_message` é um wrapper fino em cima desta função."""
     parts = text.strip().split()
     if not parts or not parts[0].startswith("/"):
-        return ""
+        return "", None
     cmd = parts[0].split("@", 1)[0].lstrip("/").lower()
-    handler = COMMANDS.get(cmd)
-    if handler is None:
-        return f"Comando desconhecido: /{esc(cmd)}\n\n{HELP}"
+    args = parts[1:]
     try:
-        return handler(parts[1:], storage)
+        if cmd in JOB_COMMANDS:
+            return JOB_COMMANDS[cmd](args, storage)
+        handler = COMMANDS.get(cmd)
+        if handler is None:
+            return f"Comando desconhecido: /{esc(cmd)}\n\n{HELP}", None
+        return handler(args, storage), None
     except CommandError as exc:
-        return f"⚠️ {exc}"
+        return f"⚠️ {exc}", None
+
+
+def handle_message(text: str, storage: Storage) -> str:
+    reply, _job = dispatch_message(text, storage)
+    return reply
 
 
 def _allowed_chat_ids() -> set[int]:
@@ -268,6 +352,35 @@ def _allowed_chat_ids() -> set[int]:
     if not ids:
         print("[aviso] nenhum chat permitido configurado — bot aceita qualquer chat", file=sys.stderr)
     return ids
+
+
+def handle_update(
+    update: dict,
+    storage: Storage,
+    telegram: TelegramClient,
+    allowed: set[int],
+    on_job=None,
+) -> bool:
+    """Processa um único update: filtra chat, despacha, responde, encaminha o
+    Job (se houver). Devolve True se respondeu. Usado pelo polling e pelo
+    webhook (server.py passa `on_job=slow_queue.put` pra não bloquear o worker
+    rápido com uma varredura/explore; sem isso, roda na hora)."""
+    msg = update.get("message") or update.get("edited_message")
+    if not msg or "text" not in msg:
+        return False
+    chat_id = msg["chat"]["id"]
+    if allowed and chat_id not in allowed:
+        return False
+    try:
+        reply, job = dispatch_message(msg["text"], storage)
+    except Exception:
+        traceback.print_exc()
+        reply, job = "⚠️ erro interno ao processar o comando", None
+    if reply:
+        telegram.send_message(reply, chat_id=chat_id)
+    if job is not None:
+        (on_job or (lambda j: run_job(j, storage)))(job)
+    return bool(reply)
 
 
 def poll_and_handle(storage: Storage, telegram: TelegramClient | None = None) -> int:
@@ -281,19 +394,7 @@ def poll_and_handle(storage: Storage, telegram: TelegramClient | None = None) ->
     max_id: int | None = None
     for update in telegram.get_updates(offset=offset):
         max_id = update["update_id"]
-        msg = update.get("message") or update.get("edited_message")
-        if not msg or "text" not in msg:
-            continue
-        chat_id = msg["chat"]["id"]
-        if allowed and chat_id not in allowed:
-            continue
-        try:
-            reply = handle_message(msg["text"], storage)
-        except Exception:
-            traceback.print_exc()
-            reply = "⚠️ erro interno ao processar o comando"
-        if reply:
-            telegram.send_message(reply, chat_id=chat_id)
+        if handle_update(update, storage, telegram, allowed):
             handled += 1
 
     if max_id is not None:
