@@ -1,8 +1,13 @@
 # ADR-006: Interactive Bot via Polling in the Existing Workflow
 
-**Status:** Accepted
+**Status:** Superseded by [ADR-008](ADR-008-vm-webhook-runtime.md)
 **Date:** 2026-08-31
 **Supersedes:** ADR-004
+
+> The GitHub Actions + polling model held until the VM edge (`vm-infra-oracle`)
+> existed to host a real webhook. ADR-008 moves the runtime off Actions
+> entirely; the reasoning below (why polling beat other options *on Actions*)
+> stays valid as a record of that constraint.
 
 ## Context
 
