@@ -1,0 +1,31 @@
+# flight-price-monitor rodando always-on na VM (era GitHub Actions cron; ver
+# ADR-008). Só a rota de webhook do Telegram é exposta, pelo edge compartilhado
+# do vm-infra-oracle — segue docs/onboarding-a-project.md daquele repo.
+name: flight-price-monitor
+
+services:
+  app:
+    build: .
+    image: flight-price-monitor:1
+    restart: unless-stopped
+    # Dá tempo do server.py drenar as filas (comando em curso, varredura) no
+    # SIGTERM antes do Docker mandar SIGKILL.
+    stop_grace_period: 30s
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
+    networks:
+      - edge
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.flight-price-monitor-tg.rule=Host(`167-234-239-28.sslip.io`) && Path(`/webhook/flight-tg`)
+      - traefik.http.routers.flight-price-monitor-tg.entrypoints=websecure
+      - traefik.http.routers.flight-price-monitor-tg.middlewares=secure-headers@file,rate-limit@file
+      - traefik.http.services.flight-price-monitor-tg.loadbalancer.server.port=8080
+    mem_limit: 384m
+
+networks:
+  # Rede compartilhada do vm-infra-oracle — precisa existir antes do `compose up`.
+  edge:
+    external: true
