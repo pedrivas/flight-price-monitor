@@ -152,9 +152,9 @@ python scripts/set_webhook.py info    # inspect (pending_update_count, last_erro
 python scripts/set_webhook.py delete  # rollback to polling
 ```
 
-*(Legacy: GitHub Actions ran this as a `monitor-passagens` cron tick before
-ADR-008 — see that ADR and ADR-006 for why it moved. `ci.yml` still runs the
-test suite on every push/PR.)*
+GitHub Actions ran this as a `monitor-passagens` cron tick before ADR-008 —
+see that ADR and ADR-006 for why it moved. Those workflow files are gone;
+`ci.yml` is the only one left, running the test suite on every push/PR.
 
 ## Architecture Decision Records
 
