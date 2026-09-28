@@ -122,22 +122,29 @@ def _route_line(r: RouteQuery, storage: Storage) -> str:
 def _routes_table(routes: list[RouteQuery], storage: Storage) -> str:
     """Tabela alinhada em fonte monoespaçada — Telegram não tem <table> no
     HTML dele, então um bloco <pre> com colunas de largura fixa é o que
-    renderiza como tabela de verdade no app."""
-    headers = ("#", "Destino", "País", "Alvo", "Último")
+    renderiza como tabela de verdade no app.
+
+    Largura importa mais do que parece: no desktop um <pre> largo rola de
+    lado, no app ele QUEBRA LINHA — o que destrói qualquer alinhamento por
+    coluna. Por isso o código IATA (3 letras) no lugar do nome da cidade e
+    separador de 1 espaço só: mantém a tabela em ~29 colunas, cabe sem
+    quebrar até em tela de celular pequena.
+    """
+    headers = ("#", "Dest", "País", "Alvo", "Último")
     right_aligned = {0, 3, 4}  # #, Alvo, Último — colunas numéricas
 
     rows = []
     for r in routes:
-        city, country = city_country(r.dest)
+        _city, country = city_country(r.dest)
         alvo = f"{r.target_price:.0f}" if r.target_price is not None else "-"
         last = storage.last_price(r.key)
         ultimo = f"{last:.0f}" if last is not None else "-"
-        rows.append((f"#{r.id}", city, country, alvo, ultimo))
+        rows.append((str(r.id), r.dest, country, alvo, ultimo))
 
     widths = [max(len(headers[i]), *(len(row[i]) for row in rows)) for i in range(len(headers))]
 
     def fmt(cells: tuple[str, ...]) -> str:
-        return "  ".join(
+        return " ".join(
             c.rjust(w) if i in right_aligned else c.ljust(w) for i, (c, w) in enumerate(zip(cells, widths))
         )
 
