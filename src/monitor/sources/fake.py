@@ -13,6 +13,24 @@ class FakeSource(PriceSource):
 
     name = "fake"
 
+    def __init__(self, prices: dict[tuple[str, str], float] | None = None) -> None:
+        # prices[(origem, destino)] fixa o preço de um trecho no quote() —
+        # os testes de hub precisam decidir qual opção ganha.
+        self.prices = prices or {}
+        self.calls: list[tuple] = []
+
+    def quote(self, origin, dest, depart, return_date=None, *, adults=1, currency="BRL",
+              nonstop=False, route_key="") -> list[Offer]:
+        self.calls.append((origin, dest, depart, return_date))
+        price = self.prices.get((origin, dest))
+        if price is None:
+            price = round(1000 * random.uniform(0.6, 1.4), 0)
+        return [Offer(
+            route_key=route_key, price=float(price), currency=currency,
+            depart_date=depart, return_date=return_date, carrier="LA", stops=0,
+            outbound=_fake_leg(origin, dest, 0), origin=origin, dest=dest,
+        )]
+
     def search(self, route: RouteQuery) -> list[Offer]:
         base = route.target_price or 1000
         dep = route.depart_range[0]

@@ -20,6 +20,7 @@ class RouteQuery:
     currency: str = "BRL"
     id: int | None = None
     active: bool = True
+    hubs: list[str] = field(default_factory=list)  # vazio = estratégia de hub desligada (ADR-009)
 
     @property
     def key(self) -> str:
@@ -67,3 +68,11 @@ class Offer:
     deep_link: str | None = None
     raw: dict = field(default_factory=dict)
     outbound: FlightLeg | None = None  # detalhe do trecho de ida, quando a fonte fornece
+    # Oferta via hub (ADR-009): `price` é a soma dos bilhetes em `legs`
+    # (origem⇄hub, hub⇄destino); `via` é o código do hub.
+    via: str | None = None
+    legs: list["Offer"] = field(default_factory=list)
+    # Origem/destino deste bilhete. Opcional: numa oferta direta vale o da
+    # rota; num bilhete dentro de `legs` é o trecho em si (ex. GRU→LIS).
+    origin: str | None = None
+    dest: str | None = None

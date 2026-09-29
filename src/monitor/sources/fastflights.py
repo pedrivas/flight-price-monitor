@@ -53,65 +53,69 @@ class FastFlightsSource(PriceSource):
 
     def search(self, route: RouteQuery) -> list[Offer]:
         offers: list[Offer] = []
-        max_stops = 0 if route.nonstop else None
-
         for dep in sample_dates(*route.depart_range):
-            legs = [
-                FlightQuery(
-                    date=dep.isoformat(),
-                    from_airport=route.origin,
-                    to_airport=route.dest,
-                    max_stops=max_stops,
-                )
-            ]
-            trip = "one-way"
             ret: date | None = None
             if route.return_after_days:
                 # checa uma única duração de viagem (ponto médio do range),
                 # para não multiplicar o nº de buscas
                 lo, hi = route.return_after_days
                 ret = dep + timedelta(days=(lo + hi) // 2)
-                legs.append(
-                    FlightQuery(
-                        date=ret.isoformat(),
-                        from_airport=route.dest,
-                        to_airport=route.origin,
-                        max_stops=max_stops,
-                    )
-                )
-                trip = "round-trip"
-
-            query = create_query(
-                flights=legs,
-                trip=trip,
-                seat="economy",
-                passengers=Passengers(adults=max(route.adults, 1)),
-                currency=route.currency,
-                language=self.language,
+            offers += self.quote(
+                route.origin, route.dest, dep, ret,
+                adults=route.adults, currency=route.currency, nonstop=route.nonstop,
+                route_key=route.key,
             )
+        return offers
 
-            results = self._fetch(query, f"{route.name} {dep}")
-            if results is None:
-                continue
+    def quote(
+        self,
+        origin: str,
+        dest: str,
+        depart: date,
+        return_date: date | None = None,
+        *,
+        adults: int = 1,
+        currency: str = "BRL",
+        nonstop: bool = False,
+        route_key: str = "",
+    ) -> list[Offer]:
+        max_stops = 0 if nonstop else None
+        legs = [FlightQuery(date=depart.isoformat(), from_airport=origin, to_airport=dest, max_stops=max_stops)]
+        if return_date:
+            legs.append(
+                FlightQuery(date=return_date.isoformat(), from_airport=dest, to_airport=origin, max_stops=max_stops)
+            )
+        query = create_query(
+            flights=legs,
+            trip="round-trip" if return_date else "one-way",
+            seat="economy",
+            passengers=Passengers(adults=max(adults, 1)),
+            currency=currency,
+            language=self.language,
+        )
+        results = self._fetch(query, f"{origin}->{dest} {depart}")
+        time.sleep(self.pause_s)  # gentileza com o Google
+        if results is None:
+            return []
 
-            for fl in results:
-                if not fl.price or fl.price <= 0 or not fl.flights:
-                    continue  # "preço indisponível"
-                offers.append(
-                    Offer(
-                        route_key=route.key,
-                        price=float(fl.price),
-                        currency=route.currency,
-                        depart_date=dep,
-                        return_date=ret,
-                        carrier=", ".join(fl.airlines) if fl.airlines else str(fl.type),
-                        stops=max(len(fl.flights) - 1, 0),  # escalas do trecho de ida
-                        outbound=_build_leg(fl.flights),
-                    )
+        offers: list[Offer] = []
+        for fl in results:
+            if not fl.price or fl.price <= 0 or not fl.flights:
+                continue  # "preço indisponível"
+            offers.append(
+                Offer(
+                    route_key=route_key,
+                    price=float(fl.price),
+                    currency=currency,
+                    depart_date=depart,
+                    return_date=return_date,
+                    carrier=", ".join(fl.airlines) if fl.airlines else str(fl.type),
+                    stops=max(len(fl.flights) - 1, 0),  # escalas do trecho de ida
+                    outbound=_build_leg(fl.flights),
+                    origin=origin,
+                    dest=dest,
                 )
-
-            time.sleep(self.pause_s)  # gentileza com o Google
-
+            )
         return offers
 
     def _fetch(self, query, label: str):
