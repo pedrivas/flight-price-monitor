@@ -299,3 +299,44 @@ def test_run_job_discover_saves_chosen_hubs(storage, monkeypatch, fake_telegram)
     bot_mod.run_job(Job(kind="discover_hubs", payload={"route_id": 1}), storage)
     assert storage.get_route(1).hubs == ["MAD"]
     assert "Monitorando direto + MAD" in fake_telegram.sent[0][1]
+
+
+# --- multidestino ----------------------------------------------------------
+def test_criar_open_jaw(storage):
+    out = handle_message("/criar SAO IST 2027-04-01..2027-04-15 10-14 6000 15 --volta-de ath", storage)
+    assert "criada" in out and "volta saindo de ATH" in out
+    r = storage.list_routes()[0]
+    assert r.return_from == "ATH" and r.name == "SAO→IST · ATH→SAO"
+
+
+def test_criar_open_jaw_rejects_one_way_hubs_and_same_airport(storage):
+    base = "/criar SAO IST 2027-04-01..2027-04-15"
+    assert "precisa de NOITES" in handle_message(f"{base} - 6000 --volta-de ATH", storage)
+    assert "não combina com hubs" in handle_message(f"{base} 10-14 6000 --volta-de ATH --hubs LIS", storage)
+    assert "ida e volta normal" in handle_message(f"{base} 10-14 6000 --volta-de IST", storage)
+    assert storage.list_routes() == []
+
+
+def test_editar_volta_de_set_and_clear(storage):
+    seed_route(storage, dest="IST")
+    assert "volta de ATH" in handle_message("/editar 1 volta_de ATH", storage)
+    assert storage.get_route(1).return_from == "ATH"
+    handle_message("/editar 1 volta_de -", storage)
+    assert storage.get_route(1).return_from is None
+
+
+def test_editar_guards_open_jaw(storage):
+    seed_route(storage, dest="IST", return_from="ATH")
+    assert "não combina com hubs" in handle_message("/editar 1 hubs LIS", storage)
+    assert "precisa de NOITES" in handle_message("/editar 1 noites -", storage)
+    seed_route(storage, dest="ATH", hubs="LIS")
+    assert "não combina com hubs" in handle_message("/editar 2 volta_de IST", storage)
+
+
+def test_list_table_shows_return_airport_in_via(storage):
+    seed_route(storage, dest="MNL", target_price=6800.0)  # Filipinas: país mais longo
+    seed_route(storage, dest="IST", return_from="ATH", target_price=6000.0)
+    out = handle_message("/monitorias", storage)
+    assert " ATH" in out.split("<pre>")[1]
+    pre_body = out.split("<pre>")[1].split("</pre>")[0]
+    assert max(len(line) for line in pre_body.splitlines()) <= 32

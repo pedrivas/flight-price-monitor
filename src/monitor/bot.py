@@ -17,11 +17,12 @@ from .telegram import TelegramClient
 HELP = (
     "<b>Comandos</b>\n"
     "/monitorias — lista as monitorias ativas\n"
-    "/criar ORIG DEST IDA_DE..IDA_ATE NOITES ALVO [DROP%] [--nonstop] [--pax N] [--hubs auto|LIS,MAD]\n"
+    "/criar ORIG DEST IDA_DE..IDA_ATE NOITES ALVO [DROP%] [--nonstop] [--pax N] [--hubs auto|LIS,MAD] [--volta-de ATH]\n"
     "    ex: <code>/criar GRU BEL 2026-09-04..2026-09-11 7-21 1700 15</code>\n"
     "    só-ida: use <code>-</code> em NOITES\n"
     "    --hubs: também monitora 2 passagens separadas via hub (auto = descobre os que compensam)\n"
-    "/editar ID CAMPO VALOR — campos: nome alvo drop pax nonstop ida_de ida_ate noites hubs\n"
+    "    --volta-de: multidestino, chega em DEST e volta saindo de outro aeroporto (2 passagens só de ida)\n"
+    "/editar ID CAMPO VALOR — campos: nome alvo drop pax nonstop ida_de ida_ate noites hubs volta_de\n"
     "    ex: <code>/editar 3 hubs auto</code> · <code>/editar 3 hubs LIS,MAD</code> · <code>/editar 3 hubs -</code>\n"
     "    só ID (sem campo/valor) mostra o detalhe daquela rota\n"
     "    ex: <code>/editar 3 alvo 1600</code>\n"
@@ -138,7 +139,7 @@ def _route_line(r: RouteQuery, storage: Storage) -> str:
     city, country = city_country(r.dest)
     text = (
         f"<b>#{r.id}</b> · {esc(r.name)} ({esc(city)}, {esc(country)})\n"
-        f"   {r.origin}→{r.dest} · {r.depart_range[0]}→{r.depart_range[1]} · {nights} · {r.adults} pax\n"
+        f"   {r.origin}→{r.dest}{f' · volta de {r.return_from}' if r.return_from else ''} · {r.depart_range[0]}→{r.depart_range[1]} · {nights} · {r.adults} pax\n"
         f"   {esc(' · '.join(crit) or 'sem critério de alerta')}{last_txt}"
     )
     if r.hubs:
@@ -170,7 +171,8 @@ def _routes_table(routes: list[RouteQuery], storage: Storage) -> str:
         alvo = f"{r.target_price:.0f}" if r.target_price is not None else "-"
         # Min = último preço mais barato entre o direto e os hubs ligados; Via diz qual
         best, hub = storage.best_last_price(r)
-        rows.append((str(r.id), r.dest, country, alvo, f"{best:.0f}" if best is not None else "-", hub or "-"))
+        via = r.return_from or hub or "-"  # multidestino nunca tem hub, então não colide
+        rows.append((str(r.id), r.dest, country, alvo, f"{best:.0f}" if best is not None else "-", via))
 
     widths = [max(len(headers[i]), *(len(row[i]) for row in rows)) for i in range(len(headers))]
 
@@ -194,7 +196,7 @@ def cmd_list(args, storage) -> str:
         return "Nenhuma monitoria ativa. Crie uma com /criar."
     return (
         f"📋 <b>Monitorias ativas</b>\n\n{_routes_table(routes, storage)}\n"
-        f"<i>valores em R$ · Via = hub da opção mais barata · detalhe: /editar ID</i>"
+        f"<i>valores em R$ · Via = hub mais barato ou aeroporto da volta (multidestino) · detalhe: /editar ID</i>"
     )
 
 
@@ -211,6 +213,7 @@ def cmd_create(args, storage) -> str | tuple[str, Job]:
     nonstop = 0
     adults = 1
     hubs: list[str] | None = []
+    return_from = None
     rest = list(args[5:])
     while rest:
         tok = rest.pop(0)
@@ -220,6 +223,10 @@ def cmd_create(args, storage) -> str | tuple[str, Job]:
             if not rest:
                 raise CommandError("--hubs precisa de auto ou códigos (ex LIS,MAD)")
             hubs = _hubs(rest.pop(0))
+        elif tok == "--volta-de":
+            if not rest:
+                raise CommandError("--volta-de precisa do aeroporto da volta (ex ATH)")
+            return_from = _airport(rest.pop(0))
         elif tok == "--pax":
             if not rest:
                 raise CommandError("--pax precisa de um número")
@@ -231,12 +238,17 @@ def cmd_create(args, storage) -> str | tuple[str, Job]:
         else:
             raise CommandError(f"argumento não reconhecido: '{tok}'")
 
+    if return_from is not None:
+        _check_open_jaw(dest, return_from, return_min, hubs)
+
     fields = dict(
-        name=f"{origin}→{dest}", origin=origin, dest=dest,
+        name=f"{origin}→{dest}" + (f" · {return_from}→{origin}" if return_from else ""),
+        origin=origin, dest=dest,
         depart_from=depart_from, depart_to=depart_to,
         return_min=return_min, return_max=return_max,
         adults=adults, target_price=target, drop_pct=drop,
         nonstop=nonstop, currency="BRL", active=1, hubs=encode_hubs(hubs),
+        return_from=return_from,
     )
     probe = RouteQuery(
         name="", origin=origin, dest=dest,
@@ -254,7 +266,21 @@ def cmd_create(args, storage) -> str | tuple[str, Job]:
         return f"{reply}\n{text}", job
     if hubs:
         reply += f"\n🧭 também via hub: {', '.join(hubs)}"
+    if return_from:
+        reply += f"\n↩️ volta saindo de {return_from} (2 passagens só de ida)"
     return reply
+
+
+def _check_open_jaw(dest: str, return_from: str | None, return_min, hubs) -> None:
+    """Multidestino precisa de NOITES (a volta é d+N) e não combina com hub."""
+    if return_from is None:
+        return
+    if return_from == dest:
+        raise CommandError("a volta sai do mesmo aeroporto da chegada — isso é ida e volta normal, sem --volta-de")
+    if return_min is None:
+        raise CommandError("multidestino precisa de NOITES (a volta é calculada a partir da ida)")
+    if hubs is None or hubs:
+        raise CommandError("multidestino não combina com hubs — escolha um dos dois")
 
 
 _EDIT_FIELDS = {
@@ -277,12 +303,19 @@ def cmd_edit(args, storage) -> str | tuple[str, Job]:
     route_id = _int_id(args[0])
     field = args[1].lower()
     value_raw = " ".join(args[2:])
-    if storage.get_route(route_id) is None:
+    route = storage.get_route(route_id)
+    if route is None:
         raise CommandError(f"monitoria #{route_id} não existe")
 
     if field == "noites":
         lo, hi = _nights(value_raw)
+        _check_open_jaw(route.dest, route.return_from, lo, route.hubs)
         storage.update_route(route_id, return_min=lo, return_max=hi)
+    elif field == "volta_de":
+        return_from = None if value_raw.strip() == "-" else _airport(value_raw.strip())
+        min_nights = route.return_after_days[0] if route.return_after_days else None
+        _check_open_jaw(route.dest, return_from, min_nights, route.hubs)
+        storage.update_route(route_id, return_from=return_from)
     elif field == "nonstop":
         storage.update_route(route_id, nonstop=1 if _flag(value_raw) else 0)
     elif field in ("alvo", "drop"):
@@ -298,11 +331,13 @@ def cmd_edit(args, storage) -> str | tuple[str, Job]:
         storage.update_route(route_id, name=value_raw)
     elif field == "hubs":
         hubs = _hubs(value_raw)
+        if route.return_from and hubs != []:
+            raise CommandError("multidestino não combina com hubs — tire antes com /editar ID volta_de -")
         if hubs is None:
             return _discover_reply(route_id)
         storage.update_route(route_id, hubs=encode_hubs(hubs))
     else:
-        raise CommandError(f"campo desconhecido: '{field}'\ncampos: {', '.join(_EDIT_FIELDS)}, noites, hubs")
+        raise CommandError(f"campo desconhecido: '{field}'\ncampos: {', '.join(_EDIT_FIELDS)}, noites, hubs, volta_de")
 
     return f"✏️ #{route_id} atualizada.\n\n{_route_line(storage.get_route(route_id), storage)}"
 
