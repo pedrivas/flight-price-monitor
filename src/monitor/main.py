@@ -15,6 +15,7 @@ for _stream in (sys.stdout, sys.stderr):
 
 from .bot import handle_message, poll_and_handle
 from .config import CONFIG_PATH, load_routes_from_yaml
+from .hubs import search_via
 from .notifier import TelegramNotifier, esc, format_alert
 from .rules import evaluate
 from .sources import get_source
@@ -24,43 +25,71 @@ from .telegram import TelegramClient
 SWEEP_INTERVAL_H = 6
 
 
+def _evaluate_and_record(route, offer, storage, label: str):
+    decision = evaluate(route, offer, storage)  # antes de gravar: baseline sem a obs. atual
+    storage.record(offer)
+    base = f"{decision.baseline:.0f}" if decision.baseline is not None else "s/ histórico"
+    print(f"[info] {label}: menor {offer.currency} {offer.price:.0f} (mediana 30d: {base})")
+    return decision
+
+
 def run_sweep(storage: Storage, dry_run: bool = False, source_name: str = "fastflights") -> int:
     source = get_source(source_name)
     notifier = None  # criado sob demanda, só quando há alerta a enviar
     delivery_broken = False  # 1ª falha de envio rebaixa o resto para só-impressão
+    leg_cache: dict = {}  # trechos via hub repetidos entre rotas (ex. LIS->ATH) só são buscados 1x
+    hubs_unsupported = False
 
     routes = storage.list_routes(active_only=True)
     alerts = 0
     for route in routes:
+        candidates = []  # (oferta, decisão): direto + cada hub ligado
+        direct_price = None
+
         # busca + leitura/gravação no banco: uma falha aqui não derruba as outras rotas
         try:
             offers = source.search(route)
-            if not offers:
-                print(f"[info] {route.name}: nenhuma oferta")
-                continue
-            cheapest = min(offers, key=lambda o: o.price)
-            decision = evaluate(route, cheapest, storage)  # antes de gravar: baseline sem a obs. atual
-            storage.record(cheapest)
+            if offers:
+                cheapest = min(offers, key=lambda o: o.price)
+                direct_price = cheapest.price
+                candidates.append((cheapest, _evaluate_and_record(route, cheapest, storage, route.name)))
         except Exception:
             print(f"[erro] {route.name}:\n{traceback.format_exc()}", file=sys.stderr)
+
+        for hub in [] if hubs_unsupported else route.hubs:
+            # cada opção de hub tem a própria chave (r7@LIS): mediana e dedupe não se misturam
+            try:
+                via = search_via(source, route, hub, leg_cache)
+                if via is not None:
+                    candidates.append((via, _evaluate_and_record(route, via, storage, f"{route.name} via {hub}")))
+            except NotImplementedError as exc:
+                hubs_unsupported = True
+                print(f"[aviso] estratégia de hub desligada nesta varredura: {exc}", file=sys.stderr)
+                break
+            except Exception:
+                print(f"[erro] {route.name} via {hub}:\n{traceback.format_exc()}", file=sys.stderr)
+
+        if not candidates:
+            print(f"[info] {route.name}: nenhuma oferta")
             continue
 
-        base = f"{decision.baseline:.0f}" if decision.baseline is not None else "s/ histórico"
-        print(f"[info] {route.name}: menor {cheapest.currency} {cheapest.price:.0f} (mediana 30d: {base})")
-
-        if decision.should_alert:
-            msg = format_alert(route, cheapest, decision)
-            if dry_run or delivery_broken:
-                print("---- ALERTA (não enviado) ----\n" + msg + "\n------------------------------")
-            else:
-                try:
-                    notifier = notifier or TelegramNotifier()
-                    notifier.send(msg)
-                    storage.mark_alerted(cheapest.route_key, cheapest.price)
-                except Exception as exc:
-                    delivery_broken = True
-                    print(f"[aviso] alerta não enviado ({exc}):\n{msg}", file=sys.stderr)
-            alerts += 1
+        # no máximo 1 alerta por rota: a opção mais barata entre as aprovadas
+        approved = [(o, d) for o, d in candidates if d.should_alert]
+        if not approved:
+            continue
+        offer, decision = min(approved, key=lambda od: od[0].price)
+        msg = format_alert(route, offer, decision, direct_price=direct_price if offer.via else None)
+        if dry_run or delivery_broken:
+            print("---- ALERTA (não enviado) ----\n" + msg + "\n------------------------------")
+        else:
+            try:
+                notifier = notifier or TelegramNotifier()
+                notifier.send(msg)
+                storage.mark_alerted(offer.route_key, offer.price)
+            except Exception as exc:
+                delivery_broken = True
+                print(f"[aviso] alerta não enviado ({exc}):\n{msg}", file=sys.stderr)
+        alerts += 1
 
     print(f"[done] {len(routes)} rotas, {alerts} alerta(s)")
     return alerts

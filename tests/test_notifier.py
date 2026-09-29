@@ -81,3 +81,16 @@ def test_alert_falls_back_without_outbound_detail(route):
     offer = make_offer(route, 850)  # outbound=None (fonte sem detalhe, ex.: travelpayouts)
     msg = format_alert(route, offer, DECISION)
     assert "🧭 direto" in msg
+
+
+def test_split_alert_lists_each_ticket_and_warns(route):
+    outer = replace(make_offer(route, 2400), origin="SAO", dest="LIS", carrier="Azul", outbound=DIRECT_LEG)
+    inner = replace(make_offer(route, 600), origin="LIS", dest="ATH", carrier="Aegean",
+                    depart_date=date(2026, 11, 12), return_date=date(2026, 11, 15))
+    via = replace(make_offer(route, 3000), via="LIS", legs=[outer, inner], route_key=f"{route.key}@LIS")
+    msg = format_alert(route, via, DECISION, direct_price=3800)
+    assert "via Lisboa (2 passagens)" in msg
+    assert "3,000 no total" in msg and "direto hoje: BRL 3,800" in msg
+    assert "1) SAO⇄LIS" in msg and "2) LIS⇄ATH · ida 12/11 · volta 15/11 · Aegean" in msg
+    assert "Passagens separadas" in msg and "Bagagem" in msg
+    assert msg.count("🔗") == 2 and "from+LIS+to+ATH+on+2026-11-12" in msg  # um link por bilhete

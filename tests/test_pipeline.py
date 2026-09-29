@@ -65,6 +65,46 @@ def test_real_sweep_without_telegram_degrades(tmp_path, capsys):
     assert "não enviado" in capsys.readouterr().err
 
 
+def _keys(storage) -> set[str]:
+    return {r[0] for r in storage.conn.execute("SELECT DISTINCT route_key FROM price_history")}
+
+
+def test_sweep_with_hub_records_each_option_and_alerts_once(tmp_path, monkeypatch, capsys):
+    from monitor.sources.fake import FakeSource
+
+    storage = Storage(tmp_path / "h.db")
+    rid = seed_route(storage, name="Com hub", hubs="LIS,MAD")
+    # direto = 999999 × 0.7 (FakeSource.search); via LIS sai 500, via MAD 900
+    src = FakeSource(prices={("GRU", "LIS"): 300, ("LIS", "REC"): 200,
+                             ("GRU", "MAD"): 600, ("MAD", "REC"): 300})
+    monkeypatch.setattr(main_mod, "get_source", lambda name: src)
+
+    alerts = main_mod.run_sweep(storage, dry_run=True, source_name="fake")
+
+    assert alerts == 1  # três opções aprovadas, um alerta só
+    assert _keys(storage) == {f"r{rid}", f"r{rid}@LIS", f"r{rid}@MAD"}
+    out = capsys.readouterr().out
+    assert out.count("ALERTA (não enviado)") == 1
+    assert "via Lisboa (2 passagens)" in out and "direto hoje" in out
+
+
+def test_sweep_skips_hubs_when_source_has_no_quote(tmp_path, monkeypatch, capsys):
+    from monitor.sources.base import PriceSource
+    from monitor.sources.fake import FakeSource
+
+    class SearchOnly(PriceSource):
+        name = "searchonly"
+        search = FakeSource.search
+
+    storage = Storage(tmp_path / "h.db")
+    rid = seed_route(storage, hubs="LIS")
+    monkeypatch.setattr(main_mod, "get_source", lambda name: SearchOnly())
+
+    assert main_mod.run_sweep(storage, dry_run=True, source_name="x") == 1  # o direto segue
+    assert _keys(storage) == {f"r{rid}"}
+    assert "estratégia de hub desligada" in capsys.readouterr().err
+
+
 def test_tick_gates_sweep_by_interval(tmp_path, monkeypatch):
     db = tmp_path / "h.db"
     monkeypatch.setenv("MONITOR_DB_PATH", str(db))

@@ -3,6 +3,7 @@ from __future__ import annotations
 import html
 from urllib.parse import urlencode
 
+from .airports import city_country
 from .models import FlightLeg, Offer, RouteQuery
 from .rules import AlertDecision
 from .telegram import TelegramClient
@@ -17,11 +18,15 @@ def esc(value: object) -> str:
 _esc = esc
 
 
-def google_flights_link(route: RouteQuery, offer: Offer) -> str:
-    q = f"Flights from {route.origin} to {route.dest} on {offer.depart_date}"
-    if offer.return_date:
-        q += f" returning {offer.return_date}"
+def _flights_link(origin: str, dest: str, depart, return_date=None) -> str:
+    q = f"Flights from {origin} to {dest} on {depart}"
+    if return_date:
+        q += f" returning {return_date}"
     return "https://www.google.com/travel/flights?" + urlencode({"q": q})
+
+
+def google_flights_link(route: RouteQuery, offer: Offer) -> str:
+    return _flights_link(route.origin, route.dest, offer.depart_date, offer.return_date)
 
 
 def format_duration(minutes: int) -> str:
@@ -42,7 +47,45 @@ def format_leg(leg: FlightLeg) -> str:
     return " ".join(bits) + f" · {format_duration(leg.total_minutes)} no total"
 
 
-def format_alert(route: RouteQuery, offer: Offer, decision: AlertDecision) -> str:
+def _format_split_alert(route: RouteQuery, offer: Offer, decision: AlertDecision,
+                        direct_price: float | None) -> str:
+    """Alerta de uma oferta via hub: um bloco por bilhete, comparação com o
+    direto e o aviso de passagens separadas (ADR-009)."""
+    hub_city, _ = city_country(offer.via or "")
+    round_trip = offer.return_date is not None
+    arrow = "⇄" if round_trip else "→"
+    lines = [
+        f"✈️ <b>Promoção: {esc(route.name)}</b> — via {esc(hub_city)} (2 passagens)",
+        "",
+        f"💰 <b>{esc(offer.currency)} {offer.price:,.0f} no total</b>  "
+        f"({esc(', '.join(decision.reasons))})",
+    ]
+    if direct_price is not None:
+        lines.append(f"   direto hoje: {esc(offer.currency)} {direct_price:,.0f}")
+    links = []
+    for i, leg in enumerate(offer.legs, start=1):
+        o, d = leg.origin or "?", leg.dest or "?"
+        dates = f"ida {leg.depart_date:%d/%m}" + (f" · volta {leg.return_date:%d/%m}" if leg.return_date else "")
+        lines.append(
+            f"🎫 {i}) {esc(o)}{arrow}{esc(d)} · {dates} · {esc(leg.carrier)} · "
+            f"{esc(leg.currency)} {leg.price:,.0f}"
+        )
+        if leg.outbound:
+            lines.append(f"   🧭 {esc(format_leg(leg.outbound))}")
+        links.append(f"{i}) {_flights_link(o, d, leg.depart_date, leg.return_date)}")
+    lines += [
+        f"⚠️ <i>Passagens separadas: atraso no 1º trecho não garante o 2º "
+        f"(há 2 dias de folga no hub). Bagagem é cobrada em cada bilhete.</i>",
+        "",
+        "🔗 " + "\n🔗 ".join(links),
+    ]
+    return "\n".join(lines)
+
+
+def format_alert(route: RouteQuery, offer: Offer, decision: AlertDecision,
+                 direct_price: float | None = None) -> str:
+    if offer.legs:
+        return _format_split_alert(route, offer, decision, direct_price)
     trip = (
         f"📅 Ida {offer.depart_date} · Volta {offer.return_date}"
         if offer.return_date
