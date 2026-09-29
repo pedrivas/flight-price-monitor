@@ -94,3 +94,16 @@ def test_split_alert_lists_each_ticket_and_warns(route):
     assert "1) SAO⇄LIS" in msg and "2) LIS⇄ATH · ida 12/11 · volta 15/11 · Aegean" in msg
     assert "Passagens separadas" in msg and "Bagagem" in msg
     assert msg.count("🔗") == 2 and "from+LIS+to+ATH+on+2026-11-12" in msg  # um link por bilhete
+
+
+def test_open_jaw_alert_titles_legs_and_multi_city_link(route):
+    out = replace(make_offer(route, 4245), origin="SAO", dest="IST", return_date=None, carrier="Air Europa")
+    back = replace(make_offer(route, 2358), origin="ATH", dest="SAO", return_date=None, carrier="Air France",
+                   depart_date=date(2026, 11, 22))
+    oj = replace(make_offer(route, 6603), legs=[out, back], origin="SAO", dest="IST",
+                 return_date=date(2026, 11, 22))
+    msg = format_alert(route, oj, DECISION)
+    assert "chega em Istambul, volta de Atenas (2 passagens só de ida)" in msg
+    assert "1) SAO→IST · ida 10/11 · Air Europa" in msg and "2) ATH→SAO · ida 22/11 · Air France" in msg
+    assert "trecho IST→ATH é por sua conta" in msg and "direto hoje" not in msg
+    assert "multidestino (1 bilhete) https://www.google.com/travel/flights?tfs=" in msg

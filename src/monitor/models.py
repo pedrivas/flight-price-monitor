@@ -21,6 +21,9 @@ class RouteQuery:
     id: int | None = None
     active: bool = True
     hubs: list[str] = field(default_factory=list)  # vazio = estratégia de hub desligada (ADR-009)
+    # Multidestino (ADR-010): chega em `dest` e volta saindo de `return_from`,
+    # cotado como 2 bilhetes só de ida. None = ida e volta normal.
+    return_from: str | None = None
 
     @property
     def key(self) -> str:

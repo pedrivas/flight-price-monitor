@@ -17,6 +17,7 @@ from .bot import handle_message, poll_and_handle
 from .config import CONFIG_PATH, load_routes_from_yaml
 from .hubs import search_via
 from .notifier import TelegramNotifier, esc, format_alert
+from .openjaw import search_openjaw
 from .rules import evaluate
 from .sources import get_source
 from .storage import Storage
@@ -48,15 +49,20 @@ def run_sweep(storage: Storage, dry_run: bool = False, source_name: str = "fastf
 
         # busca + leitura/gravação no banco: uma falha aqui não derruba as outras rotas
         try:
-            offers = source.search(route)
+            if route.return_from:
+                open_jaw = search_openjaw(source, route, leg_cache)
+                offers = [open_jaw] if open_jaw else []
+            else:
+                offers = source.search(route)
             if offers:
                 cheapest = min(offers, key=lambda o: o.price)
-                direct_price = cheapest.price
+                direct_price = None if route.return_from else cheapest.price
                 candidates.append((cheapest, _evaluate_and_record(route, cheapest, storage, route.name)))
         except Exception:
             print(f"[erro] {route.name}:\n{traceback.format_exc()}", file=sys.stderr)
 
-        for hub in [] if hubs_unsupported else route.hubs:
+        # multidestino não combina com hub (o bot recusa; aqui só garante)
+        for hub in [] if hubs_unsupported or route.return_from else route.hubs:
             # cada opção de hub tem a própria chave (r7@LIS): mediana e dedupe não se misturam
             try:
                 via = search_via(source, route, hub, leg_cache)
