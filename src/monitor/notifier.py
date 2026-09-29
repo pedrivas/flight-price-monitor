@@ -25,6 +25,22 @@ def _flights_link(origin: str, dest: str, depart, return_date=None) -> str:
     return "https://www.google.com/travel/flights?" + urlencode({"q": q})
 
 
+def _multi_city_link(legs: list[Offer]) -> str | None:
+    """Link da busca multidestino já preenchida. O Google não entende
+    multidestino no link em texto (?q=), só no parâmetro codificado `tfs` —
+    que a fast-flights sabe montar. Sem a lib, sem link."""
+    try:
+        from fast_flights import FlightQuery, create_query
+    except ImportError:
+        return None
+    query = create_query(
+        flights=[FlightQuery(date=leg.depart_date.isoformat(), from_airport=leg.origin, to_airport=leg.dest)
+                 for leg in legs],
+        trip="multi-city", language="pt-BR", currency=legs[0].currency,
+    )
+    return "https://www.google.com/travel/flights?" + urlencode(query.params())
+
+
 def google_flights_link(route: RouteQuery, offer: Offer) -> str:
     return _flights_link(route.origin, route.dest, offer.depart_date, offer.return_date)
 
@@ -49,13 +65,22 @@ def format_leg(leg: FlightLeg) -> str:
 
 def _format_split_alert(route: RouteQuery, offer: Offer, decision: AlertDecision,
                         direct_price: float | None) -> str:
-    """Alerta de uma oferta via hub: um bloco por bilhete, comparação com o
-    direto e o aviso de passagens separadas (ADR-009)."""
-    hub_city, _ = city_country(offer.via or "")
-    round_trip = offer.return_date is not None
-    arrow = "⇄" if round_trip else "→"
+    """Alerta de 2 bilhetes: via hub (ADR-009) ou multidestino (ADR-010).
+    Um bloco por bilhete, o aviso de passagens separadas e um link por trecho."""
+    if offer.via:
+        hub_city, _ = city_country(offer.via)
+        title = f"via {esc(hub_city)} (2 passagens)"
+        warning = ("Passagens separadas: atraso no 1º trecho não garante o 2º "
+                   "(há 2 dias de folga no hub). Bagagem é cobrada em cada bilhete.")
+    else:
+        dest = offer.dest or route.dest
+        back_from = offer.legs[-1].origin or "?"
+        title = (f"chega em {esc(city_country(dest)[0])}, "
+                 f"volta de {esc(city_country(back_from)[0])} (2 passagens só de ida)")
+        warning = (f"O trecho {esc(dest)}→{esc(back_from)} é por sua conta. "
+                   "Um bilhete multidestino único pode sair mais barato — confira no último link.")
     lines = [
-        f"✈️ <b>Promoção: {esc(route.name)}</b> — via {esc(hub_city)} (2 passagens)",
+        f"✈️ <b>Promoção: {esc(route.name)}</b> — {title}",
         "",
         f"💰 <b>{esc(offer.currency)} {offer.price:,.0f} no total</b>  "
         f"({esc(', '.join(decision.reasons))})",
@@ -65,6 +90,7 @@ def _format_split_alert(route: RouteQuery, offer: Offer, decision: AlertDecision
     links = []
     for i, leg in enumerate(offer.legs, start=1):
         o, d = leg.origin or "?", leg.dest or "?"
+        arrow = "⇄" if leg.return_date else "→"
         dates = f"ida {leg.depart_date:%d/%m}" + (f" · volta {leg.return_date:%d/%m}" if leg.return_date else "")
         lines.append(
             f"🎫 {i}) {esc(o)}{arrow}{esc(d)} · {dates} · {esc(leg.carrier)} · "
@@ -73,9 +99,12 @@ def _format_split_alert(route: RouteQuery, offer: Offer, decision: AlertDecision
         if leg.outbound:
             lines.append(f"   🧭 {esc(format_leg(leg.outbound))}")
         links.append(f"{i}) {_flights_link(o, d, leg.depart_date, leg.return_date)}")
+    if not offer.via:
+        multi = _multi_city_link(offer.legs)
+        if multi:
+            links.append(f"multidestino (1 bilhete) {multi}")
     lines += [
-        f"⚠️ <i>Passagens separadas: atraso no 1º trecho não garante o 2º "
-        f"(há 2 dias de folga no hub). Bagagem é cobrada em cada bilhete.</i>",
+        f"⚠️ <i>{warning}</i>",
         "",
         "🔗 " + "\n🔗 ".join(links),
     ]

@@ -52,7 +52,8 @@ CREATE TABLE IF NOT EXISTS routes (
     currency     TEXT NOT NULL DEFAULT 'BRL',
     active       INTEGER NOT NULL DEFAULT 1,
     created_at   TEXT NOT NULL,
-    hubs         TEXT
+    hubs         TEXT,
+    return_from  TEXT
 );
 
 CREATE TABLE IF NOT EXISTS kv (k TEXT PRIMARY KEY, v TEXT NOT NULL);
@@ -61,11 +62,12 @@ CREATE TABLE IF NOT EXISTS kv (k TEXT PRIMARY KEY, v TEXT NOT NULL);
 ROUTE_COLUMNS = (
     "name", "origin", "dest", "depart_from", "depart_to", "return_min", "return_max",
     "adults", "target_price", "drop_pct", "nonstop", "currency", "active", "hubs",
+    "return_from",
 )
 
 # Colunas adicionadas depois que já havia banco em produção. CREATE TABLE IF
 # NOT EXISTS não altera tabela existente, então o __init__ adiciona o que faltar.
-_ADDED_ROUTE_COLUMNS = {"hubs": "TEXT"}
+_ADDED_ROUTE_COLUMNS = {"hubs": "TEXT", "return_from": "TEXT"}
 
 
 class Storage:
@@ -266,4 +268,5 @@ def _row_to_route(row: sqlite3.Row) -> RouteQuery:
         currency=row["currency"],
         active=bool(row["active"]),
         hubs=decode_hubs(row["hubs"]),
+        return_from=row["return_from"],
     )

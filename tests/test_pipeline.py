@@ -161,3 +161,20 @@ def test_tick_seeds_routes_from_yaml_once(tmp_path, monkeypatch):
     # segunda chamada não duplica
     main_mod.tick(dry_run=True, source_name="fake", skip_bot=True, skip_sweep=True)
     assert len(Storage(db).list_routes()) == 1
+
+
+def test_sweep_open_jaw_alerts_with_both_legs(tmp_path, monkeypatch, capsys):
+    from monitor.sources.fake import FakeSource
+
+    storage = Storage(tmp_path / "h.db")
+    rid = seed_route(storage, name="SAO→IST · ATH→SAO", origin="SAO", dest="IST", return_from="ATH",
+                     hubs="LIS")  # hub é ignorado em multidestino
+    src = FakeSource(prices={("SAO", "IST"): 4000, ("ATH", "SAO"): 2000})
+    monkeypatch.setattr(main_mod, "get_source", lambda name: src)
+
+    assert main_mod.run_sweep(storage, dry_run=True, source_name="fake") == 1
+    assert _keys(storage) == {f"r{rid}"}
+    assert storage.last_price(f"r{rid}") == 6000
+    assert {(o, d) for o, d, *_ in src.calls} == {("SAO", "IST"), ("ATH", "SAO")}
+    out = capsys.readouterr().out
+    assert "chega em Istambul, volta de Atenas" in out and "direto hoje" not in out
