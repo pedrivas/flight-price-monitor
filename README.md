@@ -52,6 +52,12 @@ Amadeus Self-Service was decommissioned on 2026-07-17 — see
    duration), and a Google Flights link. Connection/duration detail is only
    available for the outbound leg — `fast-flights`' round-trip response doesn't
    include the return leg's segments — the message notes that when it applies.
+6. **Hub option (opt-in per route):** the sweep also prices *two separate
+   tickets*, origin⇄hub plus hub⇄destination, with 2 days of slack in the hub.
+   Each hub is recorded under its own history key (`r7@LIS`), and a route sends
+   at most one alert per sweep, for the cheapest option that passed. Hubs are
+   discovered per destination region (`--hubs auto`) and kept only if they beat
+   direct. See [ADR-009](docs/adr/ADR-009-hub-strategy-split-tickets.md).
 
 ## Bot commands
 
@@ -61,8 +67,9 @@ Send these to the bot (or the group) from a chat listed in `TELEGRAM_ALLOWED_CHA
 | Command | |
 |---|---|
 | `/monitorias` | list active monitors |
-| `/criar GRU BEL 2026-09-04..2026-09-11 7-21 1700 15` | create (`ORIG DEST IDA_DE..IDA_ATE NIGHTS TARGET [DROP%] [--nonstop] [--pax N]`; `NIGHTS = -` for one-way) |
-| `/editar 3 alvo 1600` | edit a field: `nome alvo drop pax nonstop ida_de ida_ate noites` |
+| `/criar GRU BEL 2026-09-04..2026-09-11 7-21 1700 15` | create (`ORIG DEST IDA_DE..IDA_ATE NIGHTS TARGET [DROP%] [--nonstop] [--pax N] [--hubs auto\|LIS,MAD]`; `NIGHTS = -` for one-way) |
+| `/editar 3 alvo 1600` | edit a field: `nome alvo drop pax nonstop ida_de ida_ate noites hubs` (`hubs auto` rediscovers, `hubs -` turns off) |
+| `/hubs SAO ATH 2027-04-01..2027-06-30 10-15 [LIS,MAD]` | one-off: direct vs. two separate tickets via each hub, per month; queued like `/explorar` |
 | `/excluir 3` | remove (confirm with `/excluir 3 sim`) |
 | `/pausar 3` · `/ativar 3` | toggle without deleting |
 | `/explorar GRU 2026-10-01..2026-10-08 2026-10-15..2026-10-22 1800 [REC,SSA]` | which destinations fit a budget; queued on the slow worker, result arrives as a separate message a few minutes later |
@@ -166,6 +173,7 @@ see that ADR and ADR-006 for why it moved. Those workflow files are gone;
 - [ADR-006: Interactive Bot via Polling in the Existing Workflow](docs/adr/ADR-006-interactive-bot-and-polling-runtime.md)
 - [ADR-007: Explore as a Separate On-Demand Workflow](docs/adr/ADR-007-explore-as-separate-dispatch-workflow.md) *(revisited by ADR-008 — `/explorar` is now a queued chat command)*
 - [ADR-008: Always-On Runtime on the Oracle VM, via Webhook](docs/adr/ADR-008-vm-webhook-runtime.md)
+- [ADR-009: Hub Strategy — Split Tickets as a Monitored Option](docs/adr/ADR-009-hub-strategy-split-tickets.md)
 
 ## Explore (destination sweep)
 
@@ -187,10 +195,23 @@ PYTHONPATH=src python -m monitor.explore \
 The curated list lives in `DEFAULT_DESTS` in `src/monitor/explore.py`; override
 per-run with `--destinations` / the command's last argument.
 
+## Hub report (split tickets)
+
+```bash
+PYTHONPATH=src python -m monitor.hubs SAO ATH 2027-04-01..2027-06-30 10-15 [--hubs LIS,MAD] [--dry-run]
+```
+
+This is the same report as `/hubs`. It samples about one departure date per
+week and prices direct against each hub. With no `--hubs`, it uses the
+candidates for the destination's region (`HUB_CANDIDATES` in
+`src/monitor/hubs.py`). Use `-` in place of nights for one-way.
+
 ## Adding a price source
 
 Implement `PriceSource.search()` in `src/monitor/sources/`, register it in
 `sources/__init__.py`, run with `--source <name>`. Nothing downstream changes.
+Implementing `quote()` too, which prices one exact date pair, makes the source
+usable for the hub strategy. Without it, hubs are skipped.
 
 ## Limitations
 
