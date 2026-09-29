@@ -88,7 +88,14 @@ class Storage:
         existing = {row["name"] for row in self.conn.execute("PRAGMA table_info(routes)")}
         for col, ddl in _ADDED_ROUTE_COLUMNS.items():
             if col not in existing:
-                self.conn.execute(f"ALTER TABLE routes ADD COLUMN {col} {ddl}")
+                try:
+                    self.conn.execute(f"ALTER TABLE routes ADD COLUMN {col} {ddl}")
+                except sqlite3.OperationalError as exc:
+                    # server.py abre uma Storage por worker ao mesmo tempo: a
+                    # outra conexão pode ter adicionado a coluna entre o PRAGMA e aqui
+                    if "duplicate column" not in str(exc):
+                        raise
+                    continue
                 print(f"[storage] migração: coluna routes.{col} adicionada")
 
     # --- histórico de preços ------------------------------------------------
