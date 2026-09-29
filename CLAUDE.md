@@ -37,6 +37,9 @@ Telegram ──HTTPS──▶ Traefik edge (vm-infra-oracle) ──▶ POST /web
 - `config/routes.yaml` is a **one-time seed** for the `routes` table; after
   that the DB is the source of truth and routes are managed via the bot.
 - Price-history key is the route row id (`r7`), so editing a route keeps its history.
+  Hub options (two separate tickets via a hub, opt-in per route in `routes.hubs`)
+  get their own key `r7@LIS`, so their baseline and dedupe never mix with the
+  direct fare. The sweep sends at most one alert per route (ADR-009).
 - Deploy platform: `vm-infra-oracle` (separate repo) — Traefik edge, exact-path
   routing, `docker-compose.yml` per project. This repo owns only its own compose
   file and follows `vm-infra-oracle/docs/onboarding-a-project.md`.
@@ -94,7 +97,7 @@ Dates must be in the future — Google Flights returns nothing for past dates.
 
 ## Conventions
 
-- **Module structure:** `monitor.{config,models,storage,rules,notifier,telegram,bot,explore,backup,server,main}`
+- **Module structure:** `monitor.{config,models,storage,rules,notifier,telegram,bot,explore,hubs,airports,backup,server,main}`
   plus `monitor.sources.*` for collectors. `telegram` = thin Bot API client
   (`send_message`/`get_updates` for polling, `set_webhook`/`delete_webhook`/
   `get_webhook_info` for the webhook); `bot` = command parsing/handlers
@@ -103,10 +106,18 @@ Dates must be in the future — Google Flights returns nothing for past dates.
   = the `/explorar` sweep, callable as a chat command or `python -m monitor.explore`
   (ADR-007, revisited by ADR-008); `backup` = the daily OCI Object Storage
   snapshot (optional — no-ops without `OCI_BACKUP_PAR_URL`); `server` = the
-  webhook process (ADR-008) — HTTP handler, two workers, scheduler.
+  webhook process (ADR-008) — HTTP handler, two workers, scheduler; `hubs` =
+  split-ticket strategy (`search_via`, `discover`, the `/hubs` report, and
+  `python -m monitor.hubs`), see ADR-009; `airports` = IATA code →
+  (city, country, region) used by the table and the hub candidates.
+- **Schema changes on an existing DB:** `CREATE TABLE IF NOT EXISTS` doesn't
+  add columns. New `routes` columns go in `_ADDED_ROUTE_COLUMNS` in
+  `storage.py`, which `ALTER TABLE`s them in on startup.
 - **Pluggable sources:** a new price source implements `PriceSource.search()` in
   `src/monitor/sources/`, is registered in `sources/__init__.py`, and changes
-  nothing downstream. See ADR-002.
+  nothing downstream. See ADR-002. Optionally it also implements `quote()`, an
+  exact origin/dest/date lookup that the hub strategy needs. Without it, hubs are
+  skipped with a log line.
 - **Environment variables are never hardcoded.** Read them via `os.environ` /
   `python-dotenv`. Secrets never land in the repo (`.env` is git-ignored).
 - **Comments explain WHY, not WHAT.** Only add a comment when the reason for the
@@ -150,3 +161,4 @@ Dates must be in the future — Google Flights returns nothing for past dates.
 | 12 | Where expensive work belongs | ADR-007/ADR-008 — the multi-minute explore sweep started as its own workflow (no worker to hand it to) and became a queued chat command once a long-running process existed |
 | 13 | Deploying always-on infra | ADR-008 — webhook + two-worker/queue design, SQLite WAL for concurrent writers, graceful SIGTERM drain, joining a shared platform via a documented contract instead of standing up a new VM |
 | 14 | Backup without a cloud SDK | `backup.py` — `sqlite3.Connection.backup()` + a plain HTTP PUT to a Pre-Authenticated Request URL; no OCI CLI, no API key, fails soft |
+| 15 | Turning a manual insight into a product feature | ADR-009 — a one-off analysis (split tickets via Madrid beat direct to Athens) became an opt-in, per-route option. The first live test showed the saving disappears for round trips, which is why hubs are *discovered and verified* per route instead of hard-coded |
