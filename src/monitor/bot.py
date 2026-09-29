@@ -11,16 +11,18 @@ from .airports import city_country
 from .config import has_no_alert_criteria
 from .models import RouteQuery
 from .notifier import esc
-from .storage import Storage
+from .storage import Storage, encode_hubs
 from .telegram import TelegramClient
 
 HELP = (
     "<b>Comandos</b>\n"
     "/monitorias — lista as monitorias ativas\n"
-    "/criar ORIG DEST IDA_DE..IDA_ATE NOITES ALVO [DROP%] [--nonstop] [--pax N]\n"
+    "/criar ORIG DEST IDA_DE..IDA_ATE NOITES ALVO [DROP%] [--nonstop] [--pax N] [--hubs auto|LIS,MAD]\n"
     "    ex: <code>/criar GRU BEL 2026-09-04..2026-09-11 7-21 1700 15</code>\n"
     "    só-ida: use <code>-</code> em NOITES\n"
-    "/editar ID CAMPO VALOR — campos: nome alvo drop pax nonstop ida_de ida_ate noites\n"
+    "    --hubs: também monitora 2 passagens separadas via hub (auto = descobre os que compensam)\n"
+    "/editar ID CAMPO VALOR — campos: nome alvo drop pax nonstop ida_de ida_ate noites hubs\n"
+    "    ex: <code>/editar 3 hubs auto</code> · <code>/editar 3 hubs LIS,MAD</code> · <code>/editar 3 hubs -</code>\n"
     "    só ID (sem campo/valor) mostra o detalhe daquela rota\n"
     "    ex: <code>/editar 3 alvo 1600</code>\n"
     "/excluir ID — remove (confirme com <code>/excluir ID sim</code>)\n"
@@ -28,6 +30,8 @@ HELP = (
     "/explorar ORIG IDA_DE..IDA_ATE VOLTA_DE..VOLTA_ATE TETO [DEST1,DEST2,...]\n"
     "    ex: <code>/explorar GRU 2026-10-01..2026-10-08 2026-10-15..2026-10-22 1800</code>\n"
     "    demora alguns minutos; o resultado chega em mensagem separada\n"
+    "/hubs ORIG DEST IDA_DE..IDA_ATE NOITES [HUB1,HUB2,...] — compara direto × 2 passagens via hub, por mês\n"
+    "    ex: <code>/hubs SAO ATH 2027-04-01..2027-06-30 10-15</code>\n"
     "/varrer — força a varredura de preços agora, fora do gate de 6h"
 )
 
@@ -38,7 +42,7 @@ class Job:
     monta o Job — quem executa é `run_job`, chamado pelo worker "lento" do
     server.py (ou direto, de forma síncrona, no modo polling local)."""
 
-    kind: str  # "sweep" | "explore"
+    kind: str  # "sweep" | "explore" | "discover_hubs" | "hubs_report"
     payload: dict = field(default_factory=dict)
 
 
@@ -98,6 +102,26 @@ def _airport(s: str) -> str:
     return s
 
 
+def _hubs(s: str) -> list[str] | None:
+    """'auto' -> None (descobrir), '-' -> [] (desligar), 'LIS,MAD' -> lista."""
+    s = s.strip()
+    if s.lower() == "auto":
+        return None
+    if s == "-":
+        return []
+    codes = [_airport(c.strip()) for c in s.replace(";", ",").split(",") if c.strip()]
+    if not codes:
+        raise CommandError("hubs: use auto, - ou códigos tipo LIS,MAD")
+    return list(dict.fromkeys(codes))
+
+
+def _discover_reply(route_id: int) -> tuple[str, Job]:
+    return (
+        f"🔎 #{route_id}: procurando hubs vantajosos (alguns minutos)… mando o resultado aqui.",
+        Job(kind="discover_hubs", payload={"route_id": route_id}),
+    )
+
+
 def _route_line(r: RouteQuery, storage: Storage) -> str:
     if r.return_after_days:
         lo, hi = r.return_after_days
@@ -112,11 +136,18 @@ def _route_line(r: RouteQuery, storage: Storage) -> str:
     last = storage.last_price(r.key)
     last_txt = f" · último: {r.currency} {last:.0f}" if last is not None else ""
     city, country = city_country(r.dest)
-    return (
+    text = (
         f"<b>#{r.id}</b> · {esc(r.name)} ({esc(city)}, {esc(country)})\n"
         f"   {r.origin}→{r.dest} · {r.depart_range[0]}→{r.depart_range[1]} · {nights} · {r.adults} pax\n"
         f"   {esc(' · '.join(crit) or 'sem critério de alerta')}{last_txt}"
     )
+    if r.hubs:
+        opts = []
+        for h in r.hubs:
+            p = storage.last_price(f"{r.key}@{h}")
+            opts.append(f"{h} {p:.0f}" if p is not None else f"{h} -")
+        text += f"\n   via hub (2 passagens): {esc(' · '.join(opts))}"
+    return text
 
 
 def _routes_table(routes: list[RouteQuery], storage: Storage) -> str:
@@ -130,16 +161,16 @@ def _routes_table(routes: list[RouteQuery], storage: Storage) -> str:
     separador de 1 espaço só: mantém a tabela em ~29 colunas, cabe sem
     quebrar até em tela de celular pequena.
     """
-    headers = ("#", "Dest", "País", "Alvo", "Último")
-    right_aligned = {0, 3, 4}  # #, Alvo, Último — colunas numéricas
+    headers = ("#", "Dest", "País", "Alvo", "Min", "Via")
+    right_aligned = {0, 3, 4}  # #, Alvo, Min — colunas numéricas
 
     rows = []
     for r in routes:
         _city, country = city_country(r.dest)
         alvo = f"{r.target_price:.0f}" if r.target_price is not None else "-"
-        last = storage.last_price(r.key)
-        ultimo = f"{last:.0f}" if last is not None else "-"
-        rows.append((str(r.id), r.dest, country, alvo, ultimo))
+        # Min = último preço mais barato entre o direto e os hubs ligados; Via diz qual
+        best, hub = storage.best_last_price(r)
+        rows.append((str(r.id), r.dest, country, alvo, f"{best:.0f}" if best is not None else "-", hub or "-"))
 
     widths = [max(len(headers[i]), *(len(row[i]) for row in rows)) for i in range(len(headers))]
 
@@ -163,11 +194,11 @@ def cmd_list(args, storage) -> str:
         return "Nenhuma monitoria ativa. Crie uma com /criar."
     return (
         f"📋 <b>Monitorias ativas</b>\n\n{_routes_table(routes, storage)}\n"
-        f"<i>valores em R$ · detalhe de uma rota: /editar ID</i>"
+        f"<i>valores em R$ · Via = hub da opção mais barata · detalhe: /editar ID</i>"
     )
 
 
-def cmd_create(args, storage) -> str:
+def cmd_create(args, storage) -> str | tuple[str, Job]:
     if len(args) < 5:
         raise CommandError("faltam argumentos.\n\n" + HELP)
     origin = _airport(args[0])
@@ -179,11 +210,16 @@ def cmd_create(args, storage) -> str:
     drop = None
     nonstop = 0
     adults = 1
+    hubs: list[str] | None = []
     rest = list(args[5:])
     while rest:
         tok = rest.pop(0)
         if tok == "--nonstop":
             nonstop = 1
+        elif tok == "--hubs":
+            if not rest:
+                raise CommandError("--hubs precisa de auto ou códigos (ex LIS,MAD)")
+            hubs = _hubs(rest.pop(0))
         elif tok == "--pax":
             if not rest:
                 raise CommandError("--pax precisa de um número")
@@ -200,7 +236,7 @@ def cmd_create(args, storage) -> str:
         depart_from=depart_from, depart_to=depart_to,
         return_min=return_min, return_max=return_max,
         adults=adults, target_price=target, drop_pct=drop,
-        nonstop=nonstop, currency="BRL", active=1,
+        nonstop=nonstop, currency="BRL", active=1, hubs=encode_hubs(hubs),
     )
     probe = RouteQuery(
         name="", origin=origin, dest=dest,
@@ -212,7 +248,13 @@ def cmd_create(args, storage) -> str:
 
     new_id = storage.add_route(**fields)
     warn = "" if depart_from > date.today().isoformat() else "\n⚠️ janela de ida no passado"
-    return f"✅ Monitoria <b>#{new_id}</b> criada: {origin}→{dest}{warn}"
+    reply = f"✅ Monitoria <b>#{new_id}</b> criada: {origin}→{dest}{warn}"
+    if hubs is None:
+        text, job = _discover_reply(new_id)
+        return f"{reply}\n{text}", job
+    if hubs:
+        reply += f"\n🧭 também via hub: {', '.join(hubs)}"
+    return reply
 
 
 _EDIT_FIELDS = {
@@ -221,7 +263,7 @@ _EDIT_FIELDS = {
 }
 
 
-def cmd_edit(args, storage) -> str:
+def cmd_edit(args, storage) -> str | tuple[str, Job]:
     if not args:
         raise CommandError("uso: /editar ID [CAMPO VALOR]  (só ID mostra o detalhe da rota)")
     if len(args) == 1:
@@ -254,8 +296,13 @@ def cmd_edit(args, storage) -> str:
         storage.update_route(route_id, **{_EDIT_FIELDS[field]: _date(value_raw)})
     elif field == "nome":
         storage.update_route(route_id, name=value_raw)
+    elif field == "hubs":
+        hubs = _hubs(value_raw)
+        if hubs is None:
+            return _discover_reply(route_id)
+        storage.update_route(route_id, hubs=encode_hubs(hubs))
     else:
-        raise CommandError(f"campo desconhecido: '{field}'\ncampos: {', '.join(_EDIT_FIELDS)}, noites")
+        raise CommandError(f"campo desconhecido: '{field}'\ncampos: {', '.join(_EDIT_FIELDS)}, noites, hubs")
 
     return f"✏️ #{route_id} atualizada.\n\n{_route_line(storage.get_route(route_id), storage)}"
 
@@ -304,6 +351,20 @@ def cmd_explore(args, storage) -> tuple[str, Job]:
     return "🔎 Rodando a busca (alguns minutos)… mando o resultado aqui.", Job(kind="explore", payload=payload)
 
 
+def cmd_hubs(args, storage) -> tuple[str, Job]:
+    if len(args) < 4:
+        raise CommandError("uso: /hubs ORIG DEST IDA_DE..IDA_ATE NOITES [HUB1,HUB2,...]")
+    origin, dest = _airport(args[0]), _airport(args[1])
+    depart_from, depart_to = _date_range(args[2])
+    return_min, return_max = _nights(args[3])
+    hubs = _hubs(args[4]) if len(args) > 4 else None
+    payload = dict(
+        origin=origin, dest=dest, depart_from=depart_from, depart_to=depart_to,
+        return_min=return_min, return_max=return_max, hubs=hubs or None,
+    )
+    return "🧭 Comparando direto × hubs (alguns minutos)… mando o resultado aqui.", Job(kind="hubs_report", payload=payload)
+
+
 def cmd_sweep_now(args, storage) -> tuple[str, Job]:
     return "🔄 Varredura forçada, iniciando agora…", Job(kind="sweep")
 
@@ -329,6 +390,29 @@ def run_job(job: Job, storage: Storage) -> None:
         )
         text = explore_module.format_results(under, near, p["origin"], p["max_price"], "BRL")
         TelegramClient().send_message(text)
+    elif job.kind == "discover_hubs":
+        from . import hubs as hubs_module
+        from .sources import get_source
+
+        route = storage.get_route(job.payload["route_id"])
+        if route is None:
+            return
+        result = hubs_module.discover(get_source(os.environ.get("PRICE_SOURCE", "fastflights")), route)
+        storage.update_route(route.id, hubs=encode_hubs(result.chosen))
+        TelegramClient().send_message(hubs_module.format_discovery(route, result))
+    elif job.kind == "hubs_report":
+        from . import hubs as hubs_module
+        from .sources import get_source
+
+        p = job.payload
+        rad = (p["return_min"], p["return_max"]) if p["return_min"] is not None else None
+        route = RouteQuery(
+            name=f"{p['origin']}→{p['dest']}", origin=p["origin"], dest=p["dest"],
+            depart_range=(date.fromisoformat(p["depart_from"]), date.fromisoformat(p["depart_to"])),
+            return_after_days=rad,
+        )
+        source = get_source(os.environ.get("PRICE_SOURCE", "fastflights"))
+        TelegramClient().send_message(hubs_module.hubs_report(source, route, p.get("hubs")))
     else:
         print(f"[erro] job desconhecido: {job.kind}", file=sys.stderr)
 
@@ -365,6 +449,7 @@ COMMANDS = {
 # Comandos que disparam trabalho demorado — devolvem (resposta imediata, Job).
 JOB_COMMANDS = {
     "explorar": cmd_explore,
+    "hubs": cmd_hubs,
     "varrer": cmd_sweep_now,
 }
 
@@ -383,7 +468,9 @@ def dispatch_message(text: str, storage: Storage) -> tuple[str, Job | None]:
         handler = COMMANDS.get(cmd)
         if handler is None:
             return f"Comando desconhecido: /{esc(cmd)}\n\n{HELP}", None
-        return handler(args, storage), None
+        out = handler(args, storage)
+        # /criar e /editar devolvem (texto, Job) quando pedem descoberta de hubs
+        return out if isinstance(out, tuple) else (out, None)
     except CommandError as exc:
         return f"⚠️ {exc}", None
 

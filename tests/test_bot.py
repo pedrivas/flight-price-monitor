@@ -228,3 +228,74 @@ def test_handle_update_respects_allowlist(storage, fake_telegram):
 
 def test_handle_update_ignores_non_text_update(storage, fake_telegram):
     assert handle_update({"message": {"chat": {"id": 1}}}, storage, fake_telegram, allowed=set()) is False
+
+
+# --- hubs ------------------------------------------------------------------
+def test_criar_with_explicit_hubs(storage):
+    out, job = dispatch_message("/criar GRU ATH 2027-04-01..2027-04-30 10-15 3500 --hubs lis,MAD", storage)
+    assert job is None and "via hub: LIS, MAD" in out
+    assert storage.list_routes()[0].hubs == ["LIS", "MAD"]
+
+
+def test_criar_with_auto_hubs_queues_discovery(storage):
+    out, job = dispatch_message("/criar GRU ATH 2027-04-01..2027-04-30 10-15 3500 --hubs auto", storage)
+    assert "criada" in out and "procurando hubs" in out
+    assert job == Job(kind="discover_hubs", payload={"route_id": 1})
+    assert storage.list_routes()[0].hubs == []  # só grava depois da descoberta
+
+
+def test_criar_rejects_bad_hub_code(storage):
+    assert "aeroporto" in handle_message("/criar GRU ATH 2027-04-01..2027-04-30 10-15 3500 --hubs LISBOA", storage)
+
+
+def test_editar_hubs_set_and_clear(storage):
+    seed_route(storage)
+    out = handle_message("/editar 1 hubs LIS,MAD", storage)
+    assert storage.get_route(1).hubs == ["LIS", "MAD"] and "via hub" in out
+    handle_message("/editar 1 hubs -", storage)
+    assert storage.get_route(1).hubs == []
+
+
+def test_editar_hubs_auto_returns_job(storage):
+    seed_route(storage)
+    _out, job = dispatch_message("/editar 1 hubs auto", storage)
+    assert job.kind == "discover_hubs" and job.payload == {"route_id": 1}
+
+
+def test_hubs_command_returns_report_job(storage):
+    out, job = dispatch_message("/hubs SAO ATH 2027-04-01..2027-06-30 10-15 LIS,MAD", storage)
+    assert "Comparando" in out
+    assert job.kind == "hubs_report"
+    assert job.payload["hubs"] == ["LIS", "MAD"] and job.payload["return_min"] == 10
+
+
+def test_hubs_command_usage(storage):
+    assert "uso: /hubs" in handle_message("/hubs SAO ATH", storage)
+
+
+def test_list_table_shows_hub_when_cheaper(storage):
+    from dataclasses import replace
+
+    from conftest import make_offer
+
+    r = storage.get_route(seed_route(storage, dest="ATH", target_price=3500.0, hubs="LIS"))
+    storage.record(make_offer(r, 3800.0))
+    storage.record(replace(make_offer(r, 13100.0), route_key=f"{r.key}@LIS"))
+    assert " 3800 -" in handle_message("/monitorias", storage)
+    storage.record(replace(make_offer(r, 3100.0), route_key=f"{r.key}@LIS"))
+    out = handle_message("/monitorias", storage)
+    assert "Via" in out and " 3100 LIS" in out
+    pre_body = out.split("<pre>")[1].split("</pre>")[0]
+    assert max(len(line) for line in pre_body.splitlines()) <= 32
+
+
+def test_run_job_discover_saves_chosen_hubs(storage, monkeypatch, fake_telegram):
+    from monitor import bot as bot_mod
+    from monitor.hubs import Discovery
+
+    seed_route(storage, dest="ATH")
+    monkeypatch.setattr("monitor.hubs.discover", lambda source, route: Discovery(direct=None, chosen=["MAD"]))
+    monkeypatch.setattr(bot_mod, "TelegramClient", lambda: fake_telegram)
+    bot_mod.run_job(Job(kind="discover_hubs", payload={"route_id": 1}), storage)
+    assert storage.get_route(1).hubs == ["MAD"]
+    assert "Monitorando direto + MAD" in fake_telegram.sent[0][1]
