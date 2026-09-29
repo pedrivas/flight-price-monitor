@@ -123,3 +123,24 @@ def test_best_last_price_picks_cheapest_option(storage):
     storage.record(replace(make_offer(r, 3100.0), route_key=f"{r.key}@MAD"))
     storage.record(replace(make_offer(r, 3300.0), route_key=f"{r.key}@LIS"))
     assert storage.best_last_price(r) == (3100.0, "MAD")
+
+
+def test_migration_tolerates_concurrent_add(tmp_path, monkeypatch):
+    # dois workers abrem o banco juntos: ambos veem a coluna faltando, um perde a corrida
+    import monitor.storage as storage_mod
+
+    db = tmp_path / "race.db"
+    Storage(db)  # já tem a coluna
+    monkeypatch.setattr(storage_mod, "_ADDED_ROUTE_COLUMNS", {"hubs": "TEXT"})
+    s = Storage.__new__(Storage)
+    s.conn = Storage(db).conn
+    real = s.conn
+
+    class StalePragma:
+        def execute(self, sql, *a):
+            if sql.startswith("PRAGMA table_info"):
+                return iter([])  # finge que a coluna não existe
+            return real.execute(sql, *a)
+
+    s.conn = StalePragma()
+    s._migrate()  # não levanta "duplicate column name"
