@@ -51,7 +51,8 @@ CREATE TABLE IF NOT EXISTS routes (
     nonstop      INTEGER NOT NULL DEFAULT 0,
     currency     TEXT NOT NULL DEFAULT 'BRL',
     active       INTEGER NOT NULL DEFAULT 1,
-    created_at   TEXT NOT NULL
+    created_at   TEXT NOT NULL,
+    hubs         TEXT
 );
 
 CREATE TABLE IF NOT EXISTS kv (k TEXT PRIMARY KEY, v TEXT NOT NULL);
@@ -59,8 +60,12 @@ CREATE TABLE IF NOT EXISTS kv (k TEXT PRIMARY KEY, v TEXT NOT NULL);
 
 ROUTE_COLUMNS = (
     "name", "origin", "dest", "depart_from", "depart_to", "return_min", "return_max",
-    "adults", "target_price", "drop_pct", "nonstop", "currency", "active",
+    "adults", "target_price", "drop_pct", "nonstop", "currency", "active", "hubs",
 )
+
+# Colunas adicionadas depois que já havia banco em produção. CREATE TABLE IF
+# NOT EXISTS não altera tabela existente, então o __init__ adiciona o que faltar.
+_ADDED_ROUTE_COLUMNS = {"hubs": "TEXT"}
 
 
 class Storage:
@@ -76,7 +81,15 @@ class Storage:
         self.conn.execute("PRAGMA journal_mode=WAL")
         self.conn.execute("PRAGMA busy_timeout=5000")
         self.conn.executescript(SCHEMA)
+        self._migrate()
         self.conn.commit()
+
+    def _migrate(self) -> None:
+        existing = {row["name"] for row in self.conn.execute("PRAGMA table_info(routes)")}
+        for col, ddl in _ADDED_ROUTE_COLUMNS.items():
+            if col not in existing:
+                self.conn.execute(f"ALTER TABLE routes ADD COLUMN {col} {ddl}")
+                print(f"[storage] migração: coluna routes.{col} adicionada")
 
     # --- histórico de preços ------------------------------------------------
     def record(self, offer: Offer) -> None:
@@ -209,6 +222,24 @@ class Storage:
     def mark_sweep_done(self) -> None:
         self.kv_set("last_sweep_at", _utc_now())
 
+    def best_last_price(self, route: RouteQuery) -> tuple[float | None, str | None]:
+        """Menor último preço entre o direto (`r7`) e cada hub ligado (`r7@LIS`).
+        Devolve (preço, hub) — hub é None quando o direto é o mais barato."""
+        best: tuple[float | None, str | None] = (self.last_price(route.key), None)
+        for hub in route.hubs:
+            p = self.last_price(f"{route.key}@{hub}")
+            if p is not None and (best[0] is None or p < best[0]):
+                best = (p, hub)
+        return best
+
+
+def encode_hubs(hubs: list[str] | None) -> str | None:
+    return ",".join(hubs) if hubs else None
+
+
+def decode_hubs(raw: str | None) -> list[str]:
+    return [h for h in (raw or "").split(",") if h]
+
 
 def _row_to_route(row: sqlite3.Row) -> RouteQuery:
     rad = None
@@ -227,4 +258,5 @@ def _row_to_route(row: sqlite3.Row) -> RouteQuery:
         nonstop=bool(row["nonstop"]),
         currency=row["currency"],
         active=bool(row["active"]),
+        hubs=decode_hubs(row["hubs"]),
     )

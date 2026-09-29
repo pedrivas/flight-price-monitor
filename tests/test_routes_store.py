@@ -74,3 +74,52 @@ def test_last_price(storage):
     assert storage.last_price(r.key) is None
     storage.record(make_offer(r, 1234.0))
     assert storage.last_price(r.key) == 1234.0
+
+
+def test_hubs_roundtrip(storage):
+    rid = seed_route(storage, hubs="LIS,MAD")
+    assert storage.get_route(rid).hubs == ["LIS", "MAD"]
+    storage.update_route(rid, hubs=None)
+    assert storage.get_route(rid).hubs == []
+
+
+def test_migration_adds_hubs_column_to_existing_db(tmp_path, capsys):
+    # o banco da VM foi criado antes da coluna existir
+    import sqlite3
+
+    db = tmp_path / "old.db"
+    conn = sqlite3.connect(db)
+    conn.execute(
+        """CREATE TABLE routes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, origin TEXT NOT NULL,
+            dest TEXT NOT NULL, depart_from TEXT NOT NULL, depart_to TEXT NOT NULL,
+            return_min INTEGER, return_max INTEGER, adults INTEGER NOT NULL DEFAULT 1,
+            target_price REAL, drop_pct REAL, nonstop INTEGER NOT NULL DEFAULT 0,
+            currency TEXT NOT NULL DEFAULT 'BRL', active INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT NOT NULL)"""
+    )
+    conn.execute(
+        "INSERT INTO routes (name, origin, dest, depart_from, depart_to, created_at) "
+        "VALUES ('Antiga', 'GRU', 'LIS', '2027-04-01', '2027-04-30', '2026-01-01')"
+    )
+    conn.commit()
+    conn.close()
+
+    s = Storage(db)
+    assert s.get_route(1).hubs == []
+    assert "coluna routes.hubs adicionada" in capsys.readouterr().out
+    Storage(db)  # idempotente: segunda abertura não tenta de novo
+    assert "adicionada" not in capsys.readouterr().out
+
+
+def test_best_last_price_picks_cheapest_option(storage):
+    from dataclasses import replace
+
+    from conftest import make_offer
+
+    r = storage.get_route(seed_route(storage, hubs="LIS,MAD"))
+    assert storage.best_last_price(r) == (None, None)
+    storage.record(make_offer(r, 3800.0))
+    storage.record(replace(make_offer(r, 3100.0), route_key=f"{r.key}@MAD"))
+    storage.record(replace(make_offer(r, 3300.0), route_key=f"{r.key}@LIS"))
+    assert storage.best_last_price(r) == (3100.0, "MAD")
