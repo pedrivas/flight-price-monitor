@@ -1,11 +1,16 @@
 from __future__ import annotations
 
+import json
 import sys
 import time
 from datetime import date, datetime, timedelta
 
-from fast_flights import FlightQuery, Passengers, create_query, get_flights
+from fast_flights import FlightQuery, Passengers, create_query
 from fast_flights.exceptions import FlightsNotFound
+from fast_flights.fetcher import fetch_flights_html
+from fast_flights.model import Airport, Flights, SimpleDatetime, SingleFlight
+from fast_flights.parser import _parse_time
+from selectolax.lexbor import LexborHTMLParser
 
 from ..dates import sample_dates
 from ..models import FlightLeg, Offer, RouteQuery
@@ -36,6 +41,59 @@ def _build_leg(segments) -> FlightLeg | None:
     except (AttributeError, TypeError, ValueError):
         return None  # dados de horário incompletos — segue sem o detalhe, não é fatal
     return FlightLeg(airports=airports, seg_minutes=seg_minutes, layover_minutes=layover_minutes, total_minutes=total_minutes)
+
+
+# Blocos de voos no payload do Google: 2 = "Melhores voos", 3 = "Outros voos".
+_RESULT_BLOCKS = (2, 3)
+
+
+def _parse_segment(sf) -> SingleFlight:
+    return SingleFlight(
+        from_airport=Airport(code=sf[3], name=sf[4]),
+        to_airport=Airport(code=sf[6], name=sf[5]),
+        departure=SimpleDatetime(date=tuple(sf[20]), time=_parse_time(sf[8])),
+        arrival=SimpleDatetime(date=tuple(sf[21]), time=_parse_time(sf[10])),
+        duration=sf[11],
+        plane_type=sf[17],
+    )
+
+
+def parse_payload(payload: list) -> list[Flights]:
+    """Lê os voos dos DOIS blocos do payload.
+
+    O parser da fast-flights (3.1) só lê o bloco 3 e ignora os "Melhores
+    voos" (bloco 2) — que é onde o Google costuma pôr a opção mais barata
+    (SAO⇄IST: R$ 6.171 no bloco 2 × R$ 6.863 no 3). Ele também quebra quando
+    falta a lista de companhias em payload[7], que aqui é irrelevante."""
+    out: list[Flights] = []
+    seen = set()
+    for idx in _RESULT_BLOCKS:
+        block = payload[idx] if len(payload) > idx else None
+        if not block or not block[0]:
+            continue
+        for item in block[0]:
+            try:
+                flight, price = item[0], item[1][0][1]
+                segments = [_parse_segment(sf) for sf in flight[2]]
+            except (IndexError, TypeError):
+                continue  # item malformado não derruba o resto
+            key = (price, tuple((s.from_airport.code, s.to_airport.code, s.departure.date, s.departure.time)
+                                for s in segments))
+            if key in seen:
+                continue  # mesmo voo nos dois blocos
+            seen.add(key)
+            out.append(Flights(type=flight[0], price=price, airlines=flight[1], flights=segments, carbon=None))
+    return out
+
+
+def parse_html(html: str) -> list[Flights]:
+    script = LexborHTMLParser(html).css_first(r"script.ds\:1")
+    if script is None:
+        raise ValueError("resposta sem o bloco de dados (script.ds:1)")
+    data = script.text().split("data:", 1)[1].rsplit(",", 1)[0]
+    if data.endswith("errorHasStatus: true"):
+        raise FlightsNotFound("no flights found; received error")
+    return parse_payload(json.loads(data))
 
 
 class FastFlightsSource(PriceSource):
@@ -119,11 +177,11 @@ class FastFlightsSource(PriceSource):
         return offers
 
     def _fetch(self, query, label: str):
-        """get_flights com retry. O parser da lib levanta IndexError/KeyError em
-        algumas respostas do Google — quase sempre transitório."""
+        """Busca + parse próprio (parse_html) com retry — rede e respostas
+        truncadas do Google falham de vez em quando, quase sempre transitório."""
         for attempt in range(3):
             try:
-                return get_flights(query)
+                return parse_html(fetch_flights_html(query))
             except FlightsNotFound:
                 return None
             except Exception as exc:  # parser frágil da fast-flights
