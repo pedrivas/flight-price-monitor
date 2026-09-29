@@ -58,6 +58,11 @@ Amadeus Self-Service was decommissioned on 2026-07-17 — see
    at most one alert per sweep, for the cheapest option that passed. Hubs are
    discovered per destination region (`--hubs auto`) and kept only if they beat
    direct. See [ADR-009](docs/adr/ADR-009-hub-strategy-split-tickets.md).
+7. **Open-jaw (`--volta-de`):** the route is priced as origin→dest on day d
+   plus return_from→origin on d+N. The alert shows both tickets and a
+   pre-filled multi-city Google Flights link. Use that link to check the
+   single-ticket fare, which the free source can't price. See
+   [ADR-010](docs/adr/ADR-010-open-jaw-as-two-one-ways.md).
 
 ## Bot commands
 
@@ -67,7 +72,8 @@ Send these to the bot (or the group) from a chat listed in `TELEGRAM_ALLOWED_CHA
 | Command | |
 |---|---|
 | `/monitorias` | list active monitors |
-| `/criar GRU BEL 2026-09-04..2026-09-11 7-21 1700 15` | create (`ORIG DEST IDA_DE..IDA_ATE NIGHTS TARGET [DROP%] [--nonstop] [--pax N] [--hubs auto\|LIS,MAD]`; `NIGHTS = -` for one-way) |
+| `/criar GRU BEL 2026-09-04..2026-09-11 7-21 1700 15` | create (`ORIG DEST IDA_DE..IDA_ATE NIGHTS TARGET [DROP%] [--nonstop] [--pax N] [--hubs auto\|LIS,MAD] [--volta-de ATH]`; `NIGHTS = -` for one-way) |
+| `/criar SAO IST 2027-04-01..2027-04-15 10-14 6000 --volta-de ATH` | open-jaw: arrive in IST, fly home from ATH (two linked one-way tickets, ADR-010); change with `/editar ID volta_de ATH\|-` |
 | `/editar 3 alvo 1600` | edit a field: `nome alvo drop pax nonstop ida_de ida_ate noites hubs` (`hubs auto` rediscovers, `hubs -` turns off) |
 | `/hubs SAO ATH 2027-04-01..2027-06-30 10-15 [LIS,MAD]` | one-off: direct vs. two separate tickets via each hub, per month; queued like `/explorar` |
 | `/excluir 3` | remove (confirm with `/excluir 3 sim`) |
@@ -174,6 +180,7 @@ see that ADR and ADR-006 for why it moved. Those workflow files are gone;
 - [ADR-007: Explore as a Separate On-Demand Workflow](docs/adr/ADR-007-explore-as-separate-dispatch-workflow.md) *(revisited by ADR-008 — `/explorar` is now a queued chat command)*
 - [ADR-008: Always-On Runtime on the Oracle VM, via Webhook](docs/adr/ADR-008-vm-webhook-runtime.md)
 - [ADR-009: Hub Strategy — Split Tickets as a Monitored Option](docs/adr/ADR-009-hub-strategy-split-tickets.md)
+- [ADR-010: Open-Jaw Routes as Two Linked One-Way Tickets](docs/adr/ADR-010-open-jaw-as-two-one-ways.md)
 
 ## Explore (destination sweep)
 
