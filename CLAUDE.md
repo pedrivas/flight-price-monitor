@@ -40,6 +40,8 @@ Telegram ──HTTPS──▶ Traefik edge (vm-infra-oracle) ──▶ POST /web
   Hub options (two separate tickets via a hub, opt-in per route in `routes.hubs`)
   get their own key `r7@LIS`, so their baseline and dedupe never mix with the
   direct fare. The sweep sends at most one alert per route (ADR-009).
+  Trip dates come from `dates.trip_for`/`sample_trips` (midpoint of the nights
+  range, or the longest stay that fits `routes.return_by` — "volta até").
   Open-jaw routes (`routes.return_from`) are two linked one-way tickets under
   the route's own key, and are mutually exclusive with hubs (ADR-010).
 - Deploy platform: `vm-infra-oracle` (separate repo) — Traefik edge, exact-path

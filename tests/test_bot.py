@@ -340,3 +340,25 @@ def test_list_table_shows_return_airport_in_via(storage):
     assert " ATH" in out.split("<pre>")[1]
     pre_body = out.split("<pre>")[1].split("</pre>")[0]
     assert max(len(line) for line in pre_body.splitlines()) <= 32
+
+
+# --- volta até -------------------------------------------------------------
+def test_criar_with_return_by(storage):
+    out = handle_message("/criar SAO ATH 2027-05-26..2027-05-31 14-19 4400 --volta-ate 2027-06-14", storage)
+    assert "volta até 2027-06-14" in out
+    assert storage.list_routes()[0].return_by.isoformat() == "2027-06-14"
+
+
+def test_criar_return_by_validations(storage):
+    base = "/criar SAO ATH 2027-05-26..2027-05-31"
+    assert "precisa de NOITES" in handle_message(f"{base} - 4400 --volta-ate 2027-06-14", storage)
+    assert "nenhuma ida cabe" in handle_message(f"{base} 14-19 4400 --volta-ate 2027-06-05", storage)
+    assert storage.list_routes() == []
+
+
+def test_editar_volta_ate_set_and_clear(storage):
+    seed_route(storage)  # ida 2026-11-05.., 5-9 noites
+    out = handle_message("/editar 1 volta_ate 2026-11-20", storage)
+    assert "volta até 2026-11-20" in out
+    handle_message("/editar 1 volta_ate -", storage)
+    assert storage.get_route(1).return_by is None

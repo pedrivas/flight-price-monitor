@@ -24,7 +24,7 @@ from datetime import date, timedelta
 from dotenv import load_dotenv
 
 from .airports import city_country, region
-from .dates import sample_dates
+from .dates import sample_dates, sample_trips, trip_for
 from .models import Offer, RouteQuery
 from .notifier import esc
 from .sources.base import PriceSource
@@ -52,10 +52,17 @@ def candidate_hubs(origin: str, dest: str) -> list[str]:
 
 
 def _nights(route: RouteQuery) -> int | None:
+    """Duração típica, só pra rótulo. As datas de verdade vêm de dates.trip_for."""
     if not route.return_after_days:
         return None
     lo, hi = route.return_after_days
-    return (lo + hi) // 2  # mesmo ponto médio que a busca direta usa
+    return (lo + hi) // 2
+
+
+def _trips(route: RouteQuery, dates: list[date] | None) -> list[tuple[date, date | None]]:
+    if dates is None:
+        return sample_trips(route)
+    return [t for t in (trip_for(route, d) for d in dates) if t is not None]
 
 
 def _quote_best(source: PriceSource, cache: dict | None, route: RouteQuery,
@@ -77,20 +84,16 @@ def search_via(source: PriceSource, route: RouteQuery, hub: str,
 
     Levanta NotImplementedError se a fonte não tem `quote` — quem chama decide
     se pula o hub ou avisa."""
-    nights = _nights(route)
-    if nights is not None and nights < MIN_NIGHTS:
-        print(f"[hub] {route.name}: {nights} noites < {MIN_NIGHTS}, sem espaço pra folga no hub — pulando {hub}",
-              file=sys.stderr)
-        return None
-
     best: Offer | None = None
-    for dep in dates if dates is not None else sample_dates(*route.depart_range):
-        if nights is None:
-            ret = None
+    short = 0
+    for dep, ret in _trips(route, dates):
+        if ret is None:
             outer = _quote_best(source, cache, route, route.origin, hub, dep, None)
             inner = _quote_best(source, cache, route, hub, route.dest, dep + timedelta(days=LAYOVER_DAYS), None)
+        elif (ret - dep).days < MIN_NIGHTS:
+            short += 1  # sem espaço pro bilhete de dentro com a folga no hub
+            continue
         else:
-            ret = dep + timedelta(days=nights)
             outer = _quote_best(source, cache, route, route.origin, hub, dep, ret)
             inner = _quote_best(source, cache, route, hub, route.dest,
                                 dep + timedelta(days=LAYOVER_DAYS), ret - timedelta(days=LAYOVER_DAYS))
@@ -112,14 +115,15 @@ def search_via(source: PriceSource, route: RouteQuery, hub: str,
                 origin=route.origin,
                 dest=route.dest,
             )
+    if short and best is None:
+        print(f"[hub] {route.name}: viagem < {MIN_NIGHTS} noites, sem espaço pra folga no hub — pulando {hub}",
+              file=sys.stderr)
     return best
 
 
 def _direct_best(source: PriceSource, cache: dict | None, route: RouteQuery, dates: list[date]) -> Offer | None:
-    nights = _nights(route)
     best = None
-    for dep in dates:
-        ret = dep + timedelta(days=nights) if nights is not None else None
+    for dep, ret in _trips(route, dates):
         o = _quote_best(source, cache, route, route.origin, route.dest, dep, ret)
         if o and (best is None or o.price < best.price):
             best = o
@@ -197,6 +201,8 @@ def hubs_report(source: PriceSource, route: RouteQuery, hubs: list[str] | None =
     city, _ = city_country(route.dest)
     nights = _nights(route)
     kind = f"ida e volta, {nights} noites" if nights is not None else "só ida"
+    if nights is not None and route.return_by:
+        kind = f"ida e volta, até {route.return_after_days[1]} noites, volta até {route.return_by:%d/%m}"
     parts = [f"🧭 <b>{esc(route.origin)} → {esc(city)} via hub</b> · {kind}"]
     for (_y, m), dates in sorted(by_month.items()):
         direct = _direct_best(source, cache, route, dates)

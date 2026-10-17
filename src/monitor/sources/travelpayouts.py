@@ -3,11 +3,11 @@ from __future__ import annotations
 import hashlib
 import os
 import time
-from datetime import date, timedelta
+from datetime import date
 
 import requests
 
-from ..dates import sample_dates
+from ..dates import sample_trips
 from ..models import Offer, RouteQuery
 from .base import PriceSource
 
@@ -62,12 +62,9 @@ class TravelpayoutsSource(PriceSource):
 
     def search(self, route: RouteQuery) -> list[Offer]:
         offers: list[Offer] = []
-        for dep in sample_dates(*route.depart_range):
+        for dep, ret in sample_trips(route):
             segments = [{"origin": route.origin, "destination": route.dest, "date": dep.isoformat()}]
-            ret: date | None = None
-            if route.return_after_days:
-                lo, hi = route.return_after_days
-                ret = dep + timedelta(days=(lo + hi) // 2)
+            if ret:
                 segments.append({"origin": route.dest, "destination": route.origin, "date": ret.isoformat()})
 
             body = {

@@ -72,7 +72,8 @@ Send these to the bot (or the group) from a chat listed in `TELEGRAM_ALLOWED_CHA
 | Command | |
 |---|---|
 | `/monitorias` | list active monitors |
-| `/criar GRU BEL 2026-09-04..2026-09-11 7-21 1700 15` | create (`ORIG DEST IDA_DE..IDA_ATE NIGHTS TARGET [DROP%] [--nonstop] [--pax N] [--hubs auto\|LIS,MAD] [--volta-de ATH]`; `NIGHTS = -` for one-way) |
+| `/criar GRU BEL 2026-09-04..2026-09-11 7-21 1700 15` | create (`ORIG DEST IDA_DE..IDA_ATE NIGHTS TARGET [DROP%] [--nonstop] [--pax N] [--hubs auto\|LIS,MAD] [--volta-de ATH] [--volta-ate AAAA-MM-DD]`; `NIGHTS = -` for one-way) |
+| `/criar SAO ATH 2027-05-26..2027-05-31 14-19 4400 --volta-ate 2027-06-14` | latest return date: each departure tests the longest stay in the NIGHTS range that is back by then (19 nights leaving 26/05, 14 leaving 31/05); change with `/editar ID volta_ate DATE|-` |
 | `/criar SAO IST 2027-04-01..2027-04-15 10-14 6000 --volta-de ATH` | open-jaw: arrive in IST, fly home from ATH (two linked one-way tickets, ADR-010); change with `/editar ID volta_de ATH\|-` |
 | `/editar 3 alvo 1600` | edit a field: `nome alvo drop pax nonstop ida_de ida_ate noites hubs` (`hubs auto` rediscovers, `hubs -` turns off) |
 | `/hubs SAO ATH 2027-04-01..2027-06-30 10-15 [LIS,MAD]` | one-off: direct vs. two separate tickets via each hub, per month; queued like `/explorar` |

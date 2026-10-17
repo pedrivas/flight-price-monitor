@@ -125,3 +125,13 @@ def test_hubs_report_groups_by_month():
     text = hubs_report(src, route, ["LIS"])
     assert "abril" in text and "maio" in text
     assert "melhor: LIS" in text and "Passagens separadas" in text
+
+
+def test_search_via_respects_return_by():
+    src = FakeSource()
+    r = _route(nights=(14, 19), depart_range=(date(2027, 5, 26), date(2027, 5, 31)), return_by=date(2027, 6, 14))
+    offer = search_via(src, r, "BCN")
+    outer, inner = offer.legs
+    assert outer.return_date <= date(2027, 6, 14)
+    assert all(ret is None or ret <= date(2027, 6, 14) for *_, ret in src.calls)
+    assert inner.return_date == outer.return_date - timedelta(days=LAYOVER_DAYS)

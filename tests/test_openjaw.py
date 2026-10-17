@@ -51,3 +51,13 @@ def test_requires_nights_and_return_airport():
         search_openjaw(FakeSource(), _route(return_after_days=None))
     with pytest.raises(ValueError):
         search_openjaw(FakeSource(), _route(return_from=None))
+
+
+def test_open_jaw_respects_return_by():
+    src = FakeSource()
+    r = _route(return_after_days=(14, 19), depart_range=(date(2027, 5, 26), date(2027, 5, 31)),
+               return_by=date(2027, 6, 14))
+    offer = search_openjaw(src, r)
+    assert offer.legs[1].depart_date <= date(2027, 6, 14)
+    backs = [dep for o, d, dep, _ in src.calls if o == "ATH"]
+    assert backs and max(backs) == date(2027, 6, 14)

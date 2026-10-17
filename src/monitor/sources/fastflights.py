@@ -12,7 +12,7 @@ from fast_flights.model import Airport, Flights, SimpleDatetime, SingleFlight
 from fast_flights.parser import _parse_time
 from selectolax.lexbor import LexborHTMLParser
 
-from ..dates import sample_dates
+from ..dates import sample_trips
 from ..models import FlightLeg, Offer, RouteQuery
 from .base import PriceSource
 
@@ -111,13 +111,9 @@ class FastFlightsSource(PriceSource):
 
     def search(self, route: RouteQuery) -> list[Offer]:
         offers: list[Offer] = []
-        for dep in sample_dates(*route.depart_range):
-            ret: date | None = None
-            if route.return_after_days:
-                # checa uma única duração de viagem (ponto médio do range),
-                # para não multiplicar o nº de buscas
-                lo, hi = route.return_after_days
-                ret = dep + timedelta(days=(lo + hi) // 2)
+        # uma duração de viagem por data de ida (dates.trip_for), para não
+        # multiplicar o nº de buscas
+        for dep, ret in sample_trips(route):
             offers += self.quote(
                 route.origin, route.dest, dep, ret,
                 adults=route.adults, currency=route.currency, nonstop=route.nonstop,
