@@ -101,7 +101,7 @@ Dates must be in the future — Google Flights returns nothing for past dates.
 
 ## Conventions
 
-- **Module structure:** `monitor.{config,models,storage,rules,notifier,telegram,bot,explore,hubs,openjaw,airports,backup,server,main}`
+- **Module structure:** `monitor.{config,models,storage,rules,notifier,telegram,bot,explore,hubs,openjaw,links,airports,backup,server,main}`
   plus `monitor.sources.*` for collectors. `telegram` = thin Bot API client
   (`send_message`/`get_updates` for polling, `set_webhook`/`delete_webhook`/
   `get_webhook_info` for the webhook); `bot` = command parsing/handlers
@@ -113,7 +113,9 @@ Dates must be in the future — Google Flights returns nothing for past dates.
   webhook process (ADR-008) — HTTP handler, two workers, scheduler; `hubs` =
   split-ticket strategy (`search_via`, `discover`, the `/hubs` report, and
   `python -m monitor.hubs`), see ADR-009; `openjaw` = `search_openjaw`, the
-  "arrive in X, fly home from Y" route type (ADR-010); `airports` = IATA code →
+  "arrive in X, fly home from Y" route type (ADR-010); `links` = last price +
+  dates + Google Flights links per option, rebuilt from `price_history` (used by
+  `/editar ID` and the `/varrer` summary); `airports` = IATA code →
   (city, country, region) used by the table and the hub candidates.
 - **Schema changes on an existing DB:** `CREATE TABLE IF NOT EXISTS` doesn't
   add columns. New `routes` columns go in `_ADDED_ROUTE_COLUMNS` in

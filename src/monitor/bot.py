@@ -9,6 +9,7 @@ from datetime import date, timedelta
 
 from .airports import city_country
 from .config import has_no_alert_criteria
+from .links import route_option_lines, sweep_summary
 from .models import RouteQuery
 from .notifier import esc
 from .storage import Storage, encode_hubs
@@ -25,7 +26,7 @@ HELP = (
     "    --volta-ate: data máxima de volta; cada ida testa a viagem mais longa de NOITES que volta até ela\n"
     "/editar ID CAMPO VALOR — campos: nome alvo drop pax nonstop ida_de ida_ate noites hubs volta_de volta_ate\n"
     "    ex: <code>/editar 3 hubs auto</code> · <code>/editar 3 hubs LIS,MAD</code> · <code>/editar 3 hubs -</code>\n"
-    "    só ID (sem campo/valor) mostra o detalhe daquela rota\n"
+    "    só ID (sem campo/valor) mostra o detalhe da rota, com preço, datas e links de cada opção\n"
     "    ex: <code>/editar 3 alvo 1600</code>\n"
     "/excluir ID — remove (confirme com <code>/excluir ID sim</code>)\n"
     "/pausar ID   /ativar ID\n"
@@ -34,7 +35,7 @@ HELP = (
     "    demora alguns minutos; o resultado chega em mensagem separada\n"
     "/hubs ORIG DEST IDA_DE..IDA_ATE NOITES [HUB1,HUB2,...] — compara direto × 2 passagens via hub, por mês\n"
     "    ex: <code>/hubs SAO ATH 2027-04-01..2027-06-30 10-15</code>\n"
-    "/varrer — força a varredura de preços agora, fora do gate de 3h"
+    "/varrer — força a varredura de preços agora, fora do gate de 3h; no fim manda um resumo com preços e links"
 )
 
 
@@ -145,11 +146,10 @@ def _route_line(r: RouteQuery, storage: Storage) -> str:
         f"   {esc(' · '.join(crit) or 'sem critério de alerta')}{last_txt}"
     )
     if r.hubs:
-        opts = []
-        for h in r.hubs:
-            p = storage.last_price(f"{r.key}@{h}")
-            opts.append(f"{h} {p:.0f}" if p is not None else f"{h} -")
-        text += f"\n   via hub (2 passagens): {esc(' · '.join(opts))}"
+        text += f"\n   via hub (2 passagens): {esc(', '.join(r.hubs))}"
+    options = route_option_lines(storage, r)
+    if options:
+        text += "\n   <i>últimos preços:</i>\n" + "\n".join(f"   💰 {line}" for line in options)
     return text
 
 
@@ -437,8 +437,11 @@ def run_job(job: Job, storage: Storage) -> None:
     if job.kind == "sweep":
         from . import main as main_mod  # import tardio: main.py importa bot.py no nível do módulo
 
-        main_mod.run_sweep(storage, dry_run=False, source_name=os.environ.get("PRICE_SOURCE", "fastflights"))
+        alerts = main_mod.run_sweep(storage, dry_run=False, source_name=os.environ.get("PRICE_SOURCE", "fastflights"))
         storage.mark_sweep_done()
+        # só no /varrer (pedido explícito): a varredura agendada de 3 em 3h
+        # mandaria isso 8x por dia — lá só o alerta chega
+        TelegramClient().send_message(sweep_summary(storage, alerts))
     elif job.kind == "explore":
         from . import explore as explore_module
 
