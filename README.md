@@ -75,12 +75,12 @@ Send these to the bot (or the group) from a chat listed in `TELEGRAM_ALLOWED_CHA
 | `/criar GRU BEL 2026-09-04..2026-09-11 7-21 1700 15` | create (`ORIG DEST IDA_DE..IDA_ATE NIGHTS TARGET [DROP%] [--nonstop] [--pax N] [--hubs auto\|LIS,MAD] [--volta-de ATH] [--volta-ate AAAA-MM-DD]`; `NIGHTS = -` for one-way) |
 | `/criar SAO ATH 2027-05-26..2027-05-31 14-19 4400 --volta-ate 2027-06-14` | latest return date: each departure tests the longest stay in the NIGHTS range that is back by then (19 nights leaving 26/05, 14 leaving 31/05); change with `/editar ID volta_ate DATE|-` |
 | `/criar SAO IST 2027-04-01..2027-04-15 10-14 6000 --volta-de ATH` | open-jaw: arrive in IST, fly home from ATH (two linked one-way tickets, ADR-010); change with `/editar ID volta_de ATH\|-` |
-| `/editar 3 alvo 1600` | edit a field: `nome alvo drop pax nonstop ida_de ida_ate noites hubs` (`hubs auto` rediscovers, `hubs -` turns off) |
+| `/editar 3 alvo 1600` | edit a field: `nome alvo drop pax nonstop ida_de ida_ate noites hubs` (`hubs auto` rediscovers, `hubs -` turns off). `/editar 3` alone shows the route plus the last price, dates and Google Flights links of each option (direct and each hub) |
 | `/hubs SAO ATH 2027-04-01..2027-06-30 10-15 [LIS,MAD]` | one-off: direct vs. two separate tickets via each hub, per month; queued like `/explorar` |
 | `/excluir 3` | remove (confirm with `/excluir 3 sim`) |
 | `/pausar 3` · `/ativar 3` | toggle without deleting |
 | `/explorar GRU 2026-10-01..2026-10-08 2026-10-15..2026-10-22 1800 [REC,SSA]` | which destinations fit a budget; queued on the slow worker, result arrives as a separate message a few minutes later |
-| `/varrer` | force a price sweep now, outside the 3h gate |
+| `/varrer` | force a price sweep now, outside the 3h gate; when it finishes, posts a summary with each monitor's best option, its dates and Google Flights links (scheduled sweeps only send alerts) |
 
 For local dev without the webhook (`--bot-only`, polling), the same commands
 work but `/explorar`/`/varrer` run inline and block until done — there's no

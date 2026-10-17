@@ -127,6 +127,22 @@ class Storage:
         ).fetchone()
         return row[0] if row else None
 
+    def last_observation(self, route_key: str) -> dict | None:
+        """Última oferta gravada (preço, datas, companhia) — base dos links do
+        /editar ID e do resumo do /varrer, sem precisar buscar de novo."""
+        row = self.conn.execute(
+            "SELECT price, currency, depart_date, return_date, carrier FROM price_history "
+            "WHERE route_key=? ORDER BY seen_at DESC LIMIT 1",
+            (route_key,),
+        ).fetchone()
+        if row is None:
+            return None
+        return {
+            "price": row["price"], "currency": row["currency"], "carrier": row["carrier"],
+            "depart_date": date.fromisoformat(row["depart_date"]),
+            "return_date": date.fromisoformat(row["return_date"]) if row["return_date"] else None,
+        }
+
     def median_last_days(self, route_key: str, days: int = 30) -> float | None:
         since = (date.today() - timedelta(days=days)).isoformat()
         rows = self.conn.execute(

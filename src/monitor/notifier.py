@@ -25,20 +25,23 @@ def _flights_link(origin: str, dest: str, depart, return_date=None) -> str:
     return "https://www.google.com/travel/flights?" + urlencode({"q": q})
 
 
-def _multi_city_link(legs: list[Offer]) -> str | None:
-    """Link da busca multidestino já preenchida. O Google não entende
-    multidestino no link em texto (?q=), só no parâmetro codificado `tfs` —
-    que a fast-flights sabe montar. Sem a lib, sem link."""
+def multi_city_url(segments: list[tuple[str, str, object]], currency: str = "BRL") -> str | None:
+    """Link da busca multidestino já preenchida, `segments` = [(origem, destino, data)].
+    O Google não entende multidestino no link em texto (?q=), só no parâmetro
+    codificado `tfs` — que a fast-flights sabe montar. Sem a lib, sem link."""
     try:
         from fast_flights import FlightQuery, create_query
     except ImportError:
         return None
     query = create_query(
-        flights=[FlightQuery(date=leg.depart_date.isoformat(), from_airport=leg.origin, to_airport=leg.dest)
-                 for leg in legs],
-        trip="multi-city", language="pt-BR", currency=legs[0].currency,
+        flights=[FlightQuery(date=d.isoformat(), from_airport=o, to_airport=t) for o, t, d in segments],
+        trip="multi-city", language="pt-BR", currency=currency,
     )
     return "https://www.google.com/travel/flights?" + urlencode(query.params())
+
+
+def _multi_city_link(legs: list[Offer]) -> str | None:
+    return multi_city_url([(leg.origin, leg.dest, leg.depart_date) for leg in legs], legs[0].currency)
 
 
 def google_flights_link(route: RouteQuery, offer: Offer) -> str:
