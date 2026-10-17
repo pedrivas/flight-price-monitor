@@ -23,7 +23,7 @@ from .sources import get_source
 from .storage import Storage
 from .telegram import TelegramClient
 
-SWEEP_INTERVAL_H = 6
+SWEEP_INTERVAL_H = 3  # ~52 buscas por varredura hoje; mais frequente arrisca bloqueio do Google
 
 
 def _evaluate_and_record(route, offer, storage, label: str):

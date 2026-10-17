@@ -80,7 +80,7 @@ Send these to the bot (or the group) from a chat listed in `TELEGRAM_ALLOWED_CHA
 | `/excluir 3` | remove (confirm with `/excluir 3 sim`) |
 | `/pausar 3` · `/ativar 3` | toggle without deleting |
 | `/explorar GRU 2026-10-01..2026-10-08 2026-10-15..2026-10-22 1800 [REC,SSA]` | which destinations fit a budget; queued on the slow worker, result arrives as a separate message a few minutes later |
-| `/varrer` | force a price sweep now, outside the 6h gate |
+| `/varrer` | force a price sweep now, outside the 3h gate |
 
 For local dev without the webhook (`--bot-only`, polling), the same commands
 work but `/explorar`/`/varrer` run inline and block until done — there's no

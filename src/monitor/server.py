@@ -1,5 +1,5 @@
 """Processo long-running: recebe o webhook do Telegram e roda a varredura de
-6h e o backup diário num horário previsível, em vez de depender do cron do
+periódica (SWEEP_INTERVAL_H, em main.py) e o backup diário num horário previsível, em vez de depender do cron do
 GitHub Actions. Ver ADR-008.
 
     python -m monitor.server

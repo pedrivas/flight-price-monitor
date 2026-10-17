@@ -158,7 +158,7 @@ def test_slow_worker_handles_backup_kind(monkeypatch, storage):
     assert calls == ["backup"]
 
 
-# --- gate de 6h --------------------------------------------------------------
+# --- gate da varredura---------------------------------------------------------
 def test_maybe_run_gated_jobs_runs_once_then_gates(storage, monkeypatch):
     calls = {"n": 0}
     monkeypatch.setattr(server_mod.main_mod, "run_sweep", lambda *a, **kw: calls.__setitem__("n", calls["n"] + 1))
