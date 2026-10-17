@@ -34,7 +34,7 @@ HELP = (
     "    demora alguns minutos; o resultado chega em mensagem separada\n"
     "/hubs ORIG DEST IDA_DE..IDA_ATE NOITES [HUB1,HUB2,...] — compara direto × 2 passagens via hub, por mês\n"
     "    ex: <code>/hubs SAO ATH 2027-04-01..2027-06-30 10-15</code>\n"
-    "/varrer — força a varredura de preços agora, fora do gate de 6h"
+    "/varrer — força a varredura de preços agora, fora do gate de 3h"
 )
 
 
