@@ -24,6 +24,9 @@ class RouteQuery:
     # Multidestino (ADR-010): chega em `dest` e volta saindo de `return_from`,
     # cotado como 2 bilhetes só de ida. None = ida e volta normal.
     return_from: str | None = None
+    # "Volta até": data máxima de volta. Com ela, cada ida testa a viagem mais
+    # longa da faixa de noites que ainda volta até essa data (dates.trip_for).
+    return_by: date | None = None
 
     @property
     def key(self) -> str:

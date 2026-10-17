@@ -6,15 +6,14 @@ tratada pelo Google como ida e volta normal (ADR-010). Então a rota vira 2
 bilhetes só de ida com as datas amarradas:
 
     ida    origem → dest           em d
-    volta  return_from → origem    em d+N
+    volta  return_from → origem    em d+N  (N: dates.trip_for)
 """
 from __future__ import annotations
 
 from dataclasses import replace
-from datetime import date, timedelta
+from datetime import date
 
-from .dates import sample_dates
-from .hubs import _nights, _quote_best
+from .hubs import _quote_best, _trips
 from .models import Offer, RouteQuery
 from .sources.base import PriceSource
 
@@ -24,12 +23,10 @@ def search_openjaw(source: PriceSource, route: RouteQuery,
     """Melhor soma ida + volta nas datas amostradas, ou None.
 
     Levanta NotImplementedError se a fonte não tem `quote`."""
-    nights = _nights(route)
-    if not route.return_from or nights is None:
+    if not route.return_from or not route.return_after_days:
         raise ValueError(f"{route.name}: multidestino exige volta_de e NOITES")
     best: Offer | None = None
-    for dep in dates if dates is not None else sample_dates(*route.depart_range):
-        ret = dep + timedelta(days=nights)
+    for dep, ret in _trips(route, dates):
         out = _quote_best(source, cache, route, route.origin, route.dest, dep, None)
         back = _quote_best(source, cache, route, route.return_from, route.origin, ret, None)
         if out is None or back is None:

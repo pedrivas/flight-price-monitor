@@ -5,7 +5,7 @@ import os
 import sys
 import traceback
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, timedelta
 
 from .airports import city_country
 from .config import has_no_alert_criteria
@@ -17,12 +17,13 @@ from .telegram import TelegramClient
 HELP = (
     "<b>Comandos</b>\n"
     "/monitorias — lista as monitorias ativas\n"
-    "/criar ORIG DEST IDA_DE..IDA_ATE NOITES ALVO [DROP%] [--nonstop] [--pax N] [--hubs auto|LIS,MAD] [--volta-de ATH]\n"
+    "/criar ORIG DEST IDA_DE..IDA_ATE NOITES ALVO [DROP%] [--nonstop] [--pax N] [--hubs auto|LIS,MAD] [--volta-de ATH] [--volta-ate AAAA-MM-DD]\n"
     "    ex: <code>/criar GRU BEL 2026-09-04..2026-09-11 7-21 1700 15</code>\n"
     "    só-ida: use <code>-</code> em NOITES\n"
     "    --hubs: também monitora 2 passagens separadas via hub (auto = descobre os que compensam)\n"
     "    --volta-de: multidestino, chega em DEST e volta saindo de outro aeroporto (2 passagens só de ida)\n"
-    "/editar ID CAMPO VALOR — campos: nome alvo drop pax nonstop ida_de ida_ate noites hubs volta_de\n"
+    "    --volta-ate: data máxima de volta; cada ida testa a viagem mais longa de NOITES que volta até ela\n"
+    "/editar ID CAMPO VALOR — campos: nome alvo drop pax nonstop ida_de ida_ate noites hubs volta_de volta_ate\n"
     "    ex: <code>/editar 3 hubs auto</code> · <code>/editar 3 hubs LIS,MAD</code> · <code>/editar 3 hubs -</code>\n"
     "    só ID (sem campo/valor) mostra o detalhe daquela rota\n"
     "    ex: <code>/editar 3 alvo 1600</code>\n"
@@ -139,7 +140,8 @@ def _route_line(r: RouteQuery, storage: Storage) -> str:
     city, country = city_country(r.dest)
     text = (
         f"<b>#{r.id}</b> · {esc(r.name)} ({esc(city)}, {esc(country)})\n"
-        f"   {r.origin}→{r.dest}{f' · volta de {r.return_from}' if r.return_from else ''} · {r.depart_range[0]}→{r.depart_range[1]} · {nights} · {r.adults} pax\n"
+        f"   {r.origin}→{r.dest}{f' · volta de {r.return_from}' if r.return_from else ''} · {r.depart_range[0]}→{r.depart_range[1]} · {nights}"
+        f"{f' · volta até {r.return_by}' if r.return_by else ''} · {r.adults} pax\n"
         f"   {esc(' · '.join(crit) or 'sem critério de alerta')}{last_txt}"
     )
     if r.hubs:
@@ -214,6 +216,7 @@ def cmd_create(args, storage) -> str | tuple[str, Job]:
     adults = 1
     hubs: list[str] | None = []
     return_from = None
+    return_by = None
     rest = list(args[5:])
     while rest:
         tok = rest.pop(0)
@@ -227,6 +230,10 @@ def cmd_create(args, storage) -> str | tuple[str, Job]:
             if not rest:
                 raise CommandError("--volta-de precisa do aeroporto da volta (ex ATH)")
             return_from = _airport(rest.pop(0))
+        elif tok == "--volta-ate":
+            if not rest:
+                raise CommandError("--volta-ate precisa de uma data (AAAA-MM-DD)")
+            return_by = _date(rest.pop(0))
         elif tok == "--pax":
             if not rest:
                 raise CommandError("--pax precisa de um número")
@@ -240,6 +247,7 @@ def cmd_create(args, storage) -> str | tuple[str, Job]:
 
     if return_from is not None:
         _check_open_jaw(dest, return_from, return_min, hubs)
+    _check_return_by(depart_from, return_min, return_by)
 
     fields = dict(
         name=f"{origin}→{dest}" + (f" · {return_from}→{origin}" if return_from else ""),
@@ -248,7 +256,7 @@ def cmd_create(args, storage) -> str | tuple[str, Job]:
         return_min=return_min, return_max=return_max,
         adults=adults, target_price=target, drop_pct=drop,
         nonstop=nonstop, currency="BRL", active=1, hubs=encode_hubs(hubs),
-        return_from=return_from,
+        return_from=return_from, return_by=return_by,
     )
     probe = RouteQuery(
         name="", origin=origin, dest=dest,
@@ -268,7 +276,21 @@ def cmd_create(args, storage) -> str | tuple[str, Job]:
         reply += f"\n🧭 também via hub: {', '.join(hubs)}"
     if return_from:
         reply += f"\n↩️ volta saindo de {return_from} (2 passagens só de ida)"
+    if return_by:
+        reply += f"\n📅 volta até {return_by}"
     return reply
+
+
+def _check_return_by(depart_from: str, return_min, return_by: str | None) -> None:
+    """Volta até só faz sentido com NOITES, e a ida mais cedo precisa caber."""
+    if return_by is None:
+        return
+    if return_min is None:
+        raise CommandError("volta até precisa de NOITES (só ida não tem volta)")
+    if date.fromisoformat(depart_from) + timedelta(days=return_min) > date.fromisoformat(return_by):
+        raise CommandError(
+            f"nenhuma ida cabe: saindo em {depart_from} com {return_min} noites já passa de {return_by}"
+        )
 
 
 def _check_open_jaw(dest: str, return_from: str | None, return_min, hubs) -> None:
@@ -316,6 +338,11 @@ def cmd_edit(args, storage) -> str | tuple[str, Job]:
         min_nights = route.return_after_days[0] if route.return_after_days else None
         _check_open_jaw(route.dest, return_from, min_nights, route.hubs)
         storage.update_route(route_id, return_from=return_from)
+    elif field == "volta_ate":
+        return_by = None if value_raw.strip() == "-" else _date(value_raw.strip())
+        min_nights = route.return_after_days[0] if route.return_after_days else None
+        _check_return_by(route.depart_range[0].isoformat(), min_nights, return_by)
+        storage.update_route(route_id, return_by=return_by)
     elif field == "nonstop":
         storage.update_route(route_id, nonstop=1 if _flag(value_raw) else 0)
     elif field in ("alvo", "drop"):
@@ -337,7 +364,7 @@ def cmd_edit(args, storage) -> str | tuple[str, Job]:
             return _discover_reply(route_id)
         storage.update_route(route_id, hubs=encode_hubs(hubs))
     else:
-        raise CommandError(f"campo desconhecido: '{field}'\ncampos: {', '.join(_EDIT_FIELDS)}, noites, hubs, volta_de")
+        raise CommandError(f"campo desconhecido: '{field}'\ncampos: {', '.join(_EDIT_FIELDS)}, noites, hubs, volta_de, volta_ate")
 
     return f"✏️ #{route_id} atualizada.\n\n{_route_line(storage.get_route(route_id), storage)}"
 
