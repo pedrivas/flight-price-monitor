@@ -35,8 +35,22 @@ def test_build_leg_with_connection_computes_layover_and_total():
     assert leg.airports == ["GRU", "LHR", "IST"]
     assert leg.seg_minutes == [680, 235]
     assert leg.layover_minutes == [110]  # 08:40 - 06:50 = 1h50
-    assert leg.total_minutes == 23 * 60 + 5  # 10/04 15:30 -> 11/04 14:35
+    # 680 + 110 + 235 = 17h05. Pelo relógio local (10/04 15:30 -> 11/04 14:35) dariam
+    # 23h05 — GRU→LHR cruza 4h de fuso.
+    assert leg.total_minutes == 17 * 60 + 5
     assert leg.stops == 1
+
+
+def test_build_leg_total_ignores_timezone_shift():
+    # GRU→MAD→ATH Iberia. Horários locais: GRU UTC-3, MAD UTC+2, ATH UTC+3.
+    segs = [
+        _seg("GRU", "MAD", ((2027, 4, 10), (16, 0)), ((2027, 4, 11), (7, 25)), 625),
+        _seg("MAD", "ATH", ((2027, 4, 11), (8, 50)), ((2027, 4, 11), (13, 35)), 225),
+    ]
+    leg = _build_leg(segs)
+    assert leg.layover_minutes == [85]
+    # chegada − partida local = 21h35; o real é 10h25 + 1h25 + 3h45 = 15h35
+    assert leg.total_minutes == 15 * 60 + 35
 
 
 def test_build_leg_empty_returns_none():

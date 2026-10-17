@@ -35,9 +35,9 @@ def _build_leg(segments) -> FlightLeg | None:
             int((_to_datetime(segments[i + 1].departure) - _to_datetime(segments[i].arrival)).total_seconds() // 60)
             for i in range(len(segments) - 1)
         ]
-        total_minutes = int(
-            (_to_datetime(segments[-1].arrival) - _to_datetime(segments[0].departure)).total_seconds() // 60
-        )
+        # Horários do Google são locais de cada aeroporto: chegada − partida erra
+        # quando cruza fuso. Conexão é no mesmo aeroporto, então a soma é segura.
+        total_minutes = sum(seg_minutes) + sum(layover_minutes)
     except (AttributeError, TypeError, ValueError):
         return None  # dados de horário incompletos — segue sem o detalhe, não é fatal
     return FlightLeg(airports=airports, seg_minutes=seg_minutes, layover_minutes=layover_minutes, total_minutes=total_minutes)
