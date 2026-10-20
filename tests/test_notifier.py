@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import replace
 from datetime import date
 
-from conftest import make_offer
+from conftest import link_has, make_offer
 
 from monitor.models import FlightLeg
 from monitor.notifier import format_alert, format_duration, format_leg, google_flights_link
@@ -38,8 +38,22 @@ def test_oneway_omits_return(route):
 
 def test_google_link_has_route_and_dates(route):
     link = google_flights_link(route, make_offer(route, 850))
-    assert link.startswith("https://www.google.com/travel/flights?")
-    assert "GRU" in link and "REC" in link and "2026-11-10" in link
+    assert link.startswith("https://www.google.com/travel/flights?tfs=")
+    assert link_has(link, "2026-11-10", "GRU", "REC", "2026-11-17", "REC", "GRU")
+
+
+def test_one_way_link_has_single_segment(route):
+    from monitor.notifier import _flights_link
+
+    link = _flights_link("ATH", "SAO", date(2027, 6, 14))
+    assert link_has(link, "2027-06-14", "ATH", "SAO") and b"SAO" not in tfs_after(link, b"SAO")
+
+
+def tfs_after(url, marker):
+    from conftest import tfs_decoded
+
+    blob = tfs_decoded(url)
+    return blob[blob.find(marker) + len(marker):]
 
 
 def test_format_duration():
@@ -93,7 +107,7 @@ def test_split_alert_lists_each_ticket_and_warns(route):
     assert "3,000 no total" in msg and "direto hoje: BRL 3,800" in msg
     assert "1) SAO⇄LIS" in msg and "2) LIS⇄ATH · ida 12/11 · volta 15/11 · Aegean" in msg
     assert "Passagens separadas" in msg and "Bagagem" in msg
-    assert msg.count("🔗") == 2 and "from+LIS+to+ATH+on+2026-11-12" in msg  # um link por bilhete
+    assert msg.count("🔗") == 2 and msg.count("travel/flights?tfs=") == 2  # um link por bilhete
 
 
 def test_open_jaw_alert_titles_legs_and_multi_city_link(route):
