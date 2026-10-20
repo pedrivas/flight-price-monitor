@@ -46,7 +46,7 @@ Amadeus Self-Service was decommissioned on 2026-07-17 — see
 2. When a sweep is due, the collector fetches fares and stores the cheapest,
    keyed by the route row id (so editing a route keeps its history).
 3. It alerts when `price <= target_price` **or** `price <= median_30d * (1 - drop_pct%)`.
-4. Dedupe: the same promo is not re-sent (fares within 2% over the last 7 days).
+4. Dedupe: the same promo (fares within 2%) is not re-sent within 24h; if it is still there the next day, it alerts again.
 5. A Telegram message goes out: price, dates, carrier, the outbound itinerary
    (connection airports + layover time for each stop, total gate-to-gate
    duration), and a Google Flights link. Connection/duration detail is only

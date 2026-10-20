@@ -24,7 +24,7 @@ condition:
    route's own recent history).
 
 Deduplicate: a route is not re-alerted if a fare within 2% was already alerted in
-the last 7 days (`alerts_sent` table).
+the last 7 days (`alerts_sent` table). *Update 2026-10: shortened to 24h (`DEDUPE_HOURS`) — with 3-hourly sweeps and promos that vanish within hours, the user wants a reminder the next day if the price is still low.*
 
 Baseline uses **median**, not mean — fare distributions are right-skewed and a
 single expensive scrape should not move the reference.
