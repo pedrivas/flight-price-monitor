@@ -15,6 +15,12 @@ def _utc_now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
 
 
+# Janela de dedupe: a mesma promoção (±2%) não é reenviada dentro dela. Era 7
+# dias; com varredura de 3 em 3h e promoções que somem em horas, o usuário
+# prefere ser lembrado no dia seguinte se o preço continuar baixo.
+DEDUPE_HOURS = 24
+
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS price_history (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -156,11 +162,12 @@ class Storage:
         return prices[mid] if len(prices) % 2 else (prices[mid - 1] + prices[mid]) / 2
 
     def already_alerted(self, route_key: str, price: float, tolerance: float = 0.02) -> bool:
-        """Evita reenviar a mesma promoção. Considera preços dentro de `tolerance`
-        (2%) como 'o mesmo alerta'."""
+        """Evita reenviar a mesma promoção nas últimas DEDUPE_HOURS. Considera
+        preços dentro de `tolerance` (2%) como 'o mesmo alerta'."""
+        since = (datetime.now(timezone.utc) - timedelta(hours=DEDUPE_HOURS)).strftime("%Y-%m-%dT%H:%M:%S")
         rows = self.conn.execute(
             "SELECT price FROM alerts_sent WHERE route_key=? AND sent_at>=?",
-            (route_key, (date.today() - timedelta(days=7)).isoformat()),
+            (route_key, since),
         ).fetchall()
         return any(abs(p[0] - price) <= p[0] * tolerance for p in rows)
 

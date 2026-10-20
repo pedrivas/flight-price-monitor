@@ -44,6 +44,16 @@ def test_already_alerted_within_tolerance(storage, route):
     assert storage.already_alerted(route.key, 1050.0) is False  # +5%
 
 
+def test_same_promo_can_be_resent_after_24h(storage, route):
+    old = (datetime.now(timezone.utc) - timedelta(hours=25)).strftime("%Y-%m-%dT%H:%M:%S")
+    storage.conn.execute("INSERT INTO alerts_sent (route_key, price, sent_at) VALUES (?,?,?)",
+                         (route.key, 1000.0, old))
+    assert storage.already_alerted(route.key, 1000.0) is False  # passou 1 dia: pode reenviar
+    recent = (datetime.now(timezone.utc) - timedelta(hours=23)).strftime("%Y-%m-%dT%H:%M:%S")
+    storage.conn.execute("UPDATE alerts_sent SET sent_at=? WHERE route_key=?", (recent, route.key))
+    assert storage.already_alerted(route.key, 1000.0) is True   # ainda dentro das 24h
+
+
 def test_already_alerted_scoped_by_route(storage, route):
     storage.mark_alerted(route.key, 1000.0)
     assert storage.already_alerted("OUTRA-ROTA", 1000.0) is False
