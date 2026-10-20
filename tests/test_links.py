@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import replace
 from datetime import date
 
-from conftest import make_offer, seed_route
+from conftest import link_has, make_offer, seed_route
 
 from monitor.bot import Job, handle_message, run_job
 from monitor.links import option_links, route_option_lines, sweep_summary
@@ -18,22 +18,23 @@ def test_direct_link_is_round_trip_search():
     r = replace(seed_route_query(), origin="SAO", dest="ATH")
     [(label, url)] = option_links(r, r.key, date(2027, 5, 26), date(2027, 6, 14))
     assert label == "Google Flights"
-    assert "SAO+to+ATH+on+2027-05-26+returning+2027-06-14" in url
+    assert link_has(url, "2027-05-26", "SAO", "ATH", "2027-06-14", "ATH", "SAO")
 
 
 def test_hub_links_follow_layover_rule():
     r = replace(seed_route_query(), origin="SAO", dest="ATH", hubs=["BCN"])
     (l1, u1), (l2, u2) = option_links(r, f"{r.key}@BCN", date(2027, 5, 26), date(2027, 6, 14))
     assert (l1, l2) == ("SAO⇄BCN", "BCN⇄ATH")
-    assert "SAO+to+BCN+on+2027-05-26+returning+2027-06-14" in u1
-    assert "BCN+to+ATH+on+2027-05-28+returning+2027-06-12" in u2  # 2 dias de folga de cada lado
+    assert link_has(u1, "2027-05-26", "SAO", "BCN", "2027-06-14", "BCN", "SAO")
+    assert link_has(u2, "2027-05-28", "BCN", "ATH", "2027-06-12", "ATH", "BCN")  # 2 dias de folga de cada lado
 
 
 def test_open_jaw_links_include_multi_city():
     r = replace(seed_route_query(), origin="SAO", dest="IST", return_from="ATH")
     links = option_links(r, r.key, date(2027, 5, 26), date(2027, 6, 14))
     assert [lbl for lbl, _ in links] == ["SAO→IST", "ATH→SAO", "multidestino"]
-    assert "ATH+to+SAO+on+2027-06-14" in links[1][1] and "tfs=" in links[2][1]
+    assert link_has(links[1][1], "2027-06-14", "ATH", "SAO")
+    assert link_has(links[2][1], "2027-05-26", "SAO", "IST", "2027-06-14", "ATH", "SAO")
 
 
 def test_route_option_lines_one_per_priced_option(storage):
@@ -81,3 +82,10 @@ def seed_route_query():
 
     return RouteQuery(id=14, name="r", origin="SAO", dest="ATH",
                       depart_range=(date(2027, 5, 26), date(2027, 5, 31)), return_after_days=(14, 19))
+
+
+def test_links_are_prefilled_searches_not_text_queries():
+    # ?q=Flights from X to Y abre o Google Flights vazio — todo link tem que ser tfs
+    r = replace(seed_route_query(), origin="SAO", dest="ATH", hubs=["MXP"])
+    for _, url in option_links(r, f"{r.key}@MXP", date(2027, 5, 31), date(2027, 6, 14)):
+        assert "tfs=" in url and "?q=" not in url

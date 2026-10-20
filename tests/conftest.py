@@ -84,3 +84,24 @@ def make_offer(route: RouteQuery, price: float) -> Offer:
         carrier="LATAM",
         stops=0,
     )
+
+
+def tfs_decoded(url: str) -> bytes:
+    """Conteúdo do parâmetro `tfs` de um link do Google Flights (protobuf em
+    base64): as datas e os códigos de aeroporto aparecem em texto dentro dele."""
+    import base64
+    from urllib.parse import parse_qs, urlparse
+
+    tfs = parse_qs(urlparse(url).query)["tfs"][0]
+    return base64.urlsafe_b64decode(tfs + "=" * (-len(tfs) % 4))
+
+
+def link_has(url: str, *parts: str) -> bool:
+    """True se todas as `parts` (datas, códigos) aparecem, em ordem, no `tfs`."""
+    blob, pos = tfs_decoded(url), 0
+    for p in parts:
+        pos = blob.find(p.encode(), pos)
+        if pos < 0:
+            return False
+        pos += len(p)
+    return True

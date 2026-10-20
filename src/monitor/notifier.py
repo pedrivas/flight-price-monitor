@@ -18,26 +18,36 @@ def esc(value: object) -> str:
 _esc = esc
 
 
-def _flights_link(origin: str, dest: str, depart, return_date=None) -> str:
-    q = f"Flights from {origin} to {dest} on {depart}"
-    if return_date:
-        q += f" returning {return_date}"
-    return "https://www.google.com/travel/flights?" + urlencode({"q": q})
-
-
-def multi_city_url(segments: list[tuple[str, str, object]], currency: str = "BRL") -> str | None:
-    """Link da busca multidestino já preenchida, `segments` = [(origem, destino, data)].
-    O Google não entende multidestino no link em texto (?q=), só no parâmetro
-    codificado `tfs` — que a fast-flights sabe montar. Sem a lib, sem link."""
+def _tfs_url(segments: list[tuple[str, str, object]], trip: str, currency: str) -> str | None:
+    """Link do Google Flights com a busca já preenchida, no parâmetro codificado
+    `tfs` (o mesmo que o site gera). A fast-flights monta; sem a lib, None."""
     try:
         from fast_flights import FlightQuery, create_query
     except ImportError:
         return None
     query = create_query(
         flights=[FlightQuery(date=d.isoformat(), from_airport=o, to_airport=t) for o, t, d in segments],
-        trip="multi-city", language="pt-BR", currency=currency,
+        trip=trip, language="pt-BR", currency=currency,
     )
     return "https://www.google.com/travel/flights?" + urlencode(query.params())
+
+
+def _flights_link(origin: str, dest: str, depart, return_date=None, currency: str = "BRL") -> str:
+    # O link em texto (?q=Flights from X to Y on ...) abre o Google Flights
+    # VAZIO no navegador — só o `tfs` abre a busca com rota e datas.
+    if return_date:
+        url = _tfs_url([(origin, dest, depart), (dest, origin, return_date)], "round-trip", currency)
+    else:
+        url = _tfs_url([(origin, dest, depart)], "one-way", currency)
+    if url:
+        return url
+    q = f"Flights from {origin} to {dest} on {depart}" + (f" returning {return_date}" if return_date else "")
+    return "https://www.google.com/travel/flights?" + urlencode({"q": q})
+
+
+def multi_city_url(segments: list[tuple[str, str, object]], currency: str = "BRL") -> str | None:
+    """Link da busca multidestino já preenchida, `segments` = [(origem, destino, data)]."""
+    return _tfs_url(segments, "multi-city", currency)
 
 
 def _multi_city_link(legs: list[Offer]) -> str | None:
